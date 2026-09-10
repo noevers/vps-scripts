@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: info.sh (硬件概况 / 内存频率 / 硬盘读写与通电时间 / 网络双向测速)
+# Script: info.sh (硬件概况 / 内存频率 / 硬盘读写与通电时间 / 全球双向测速)
 # Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
 # ==============================================================================
 set -e
@@ -24,14 +24,16 @@ ARCH=$(uname -m)
 KERNEL=$(uname -r)
 UPTIME=$(awk '{printf("%d天 %d小时 %d分钟",($1/60/60/24),($1/60/60%24),($1/60%60))}' /proc/uptime 2>/dev/null || echo "未知")
 
-# 2. 内存与内存频率 (DMI / dmidecode)
+# 2. 内存与内存频率
 MEM_TOTAL=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}' || echo "0")
 MEM_USED=$(free -m 2>/dev/null | awk '/Mem:/ {print $3}' || echo "0")
 SWAP_TOTAL=$(free -m 2>/dev/null | awk '/Swap:/ {print $2}' || echo "0")
 
+# 尝试安全安装 dmidecode (忽略 apt 源过期报错)
 if ! command -v dmidecode >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq && apt-get install -y -qq dmidecode >/dev/null 2>&1 || true
+        apt-get update -o Acquire::Check-Valid-Until=false -qq >/dev/null 2>&1 || true
+        apt-get install -y -qq dmidecode >/dev/null 2>&1 || true
     elif command -v yum >/dev/null 2>&1; then
         yum install -y -q dmidecode >/dev/null 2>&1 || true
     elif command -v apk >/dev/null 2>&1; then
@@ -76,7 +78,8 @@ echo -e "${C_YELLOW}[ 硬盘存储设备、通电时间与读写统计 ]${C_RESE
 
 if ! command -v smartctl >/dev/null 2>&1; then
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -qq && apt-get install -y -qq smartmontools >/dev/null 2>&1 || true
+        apt-get update -o Acquire::Check-Valid-Until=false -qq >/dev/null 2>&1 || true
+        apt-get install -y -qq smartmontools >/dev/null 2>&1 || true
     elif command -v yum >/dev/null 2>&1; then
         yum install -y -q smartmontools >/dev/null 2>&1 || true
     elif command -v apk >/dev/null 2>&1; then
@@ -115,8 +118,8 @@ for d in $DISKS; do
     if [ -n "$DISK_STAT" ]; then
         RAW_R=$(echo "$DISK_STAT" | cut -d'|' -f1)
         RAW_W=$(echo "$DISK_STAT" | cut -d'|' -f2)
-        echo -e " - 本次开机读取 : ${C_CYAN}$(format_bytes $RAW_R)${C_RESET}"
-        echo -e " - 本次开机写入 : ${C_CYAN}$(format_bytes $RAW_W)${C_RESET}"
+        echo -e " - 宿主开机读取 : ${C_CYAN}$(format_bytes $RAW_R)${C_RESET}"
+        echo -e " - 宿主开机写入 : ${C_CYAN}$(format_bytes $RAW_W)${C_RESET}"
     fi
 
     # B. SMART 硬件终生累计数据
@@ -136,13 +139,11 @@ for d in $DISKS; do
         [ -z "$POW_CYCLES" ] && POW_CYCLES=$(echo "$SMART_RAW" | grep -i "Power Cycles:" | awk -F: '{print $2}' | tr -d ' ')
         [ -n "$POW_CYCLES" ] && [ "$POW_CYCLES" != "0" ] && echo -e " - 硬件通电次数 : ${C_CYAN}${POW_CYCLES} 次${C_RESET}"
 
-        # 终生总写入 (适配 Micron 镁光 / 三星 / 闪迪 / NVMe / 标准 SATA SSD)
-        # 1. 检查是否有厂商特定的 246/247/248 扇区或 GB 属性 (美光 Micron: 246 Total_LBAs_Written 或 Cumulative_Host_Sectors_Written)
-        # Micron 5300 的 ID# 246 / 241 通常是以 32MB 或者 512B 扇区记录
+        # 终生总写入 / 读取 (Micron 5100/5300, Samsung, NVMe, SATA)
         TOTAL_W_FORMATTED=""
         TOTAL_R_FORMATTED=""
 
-        # NVMe 固态硬盘:
+        # NVMe 固态硬盘
         NVME_W_UNITS=$(echo "$SMART_RAW" | grep -i "Data Units Written:" | awk -F: '{print $2}' | awk '{print $1}' | tr -d ',')
         if [ -n "$NVME_W_UNITS" ]; then
             TOTAL_W_TB=$(awk -v u="$NVME_W_UNITS" 'BEGIN {printf "%.2f", (u * 512 * 1000) / (1024*1024*1024*1024)}')
@@ -154,15 +155,13 @@ for d in $DISKS; do
             TOTAL_R_FORMATTED="${TOTAL_R_TB} TB"
         fi
 
-        # SATA 企业级固态 (如 Micron 5300, Samsung PM883, Intel D3 等):
+        # SATA 企业级固态 (Micron 5100/5300/5400 等)
         if [ -z "$TOTAL_W_FORMATTED" ]; then
-            # 优先查找是否有直接标注的 Logical Sectors Written 或 GB Written
             MICRON_LBAS=$(echo "$SMART_RAW" | awk '$1=="246" || $2=="Total_LBAs_Written" || $2=="Cumulative_Host_Sectors_Written" {print $10}' | head -n1)
             [ -z "$MICRON_LBAS" ] && MICRON_LBAS=$(echo "$SMART_RAW" | awk '$1=="241" || $2=="Host_Writes_32MiB" || $2=="Total_Writes_GiB" {print $10}' | head -n1)
             
             if [ -n "$MICRON_LBAS" ] && [ "$MICRON_LBAS" != "0" ]; then
-                # 判断是 32MiB 块还是 512B 扇区 (美光 5300 为 32MiB / 扇区兼容计算)
-                # 若数值小于 10000000 通常是 32MiB 计数
+                # 针对 Micron 5100/5300 判定 32MiB 块还是 512B 扇区
                 if (( $(awk -v l="$MICRON_LBAS" 'BEGIN {print (l<500000000)?1:0}') )); then
                     TOTAL_W_TB=$(awk -v l="$MICRON_LBAS" 'BEGIN {printf "%.2f", (l * 32 * 1024 * 1024) / (1024*1024*1024*1024)}')
                     [ "$TOTAL_W_TB" = "0.00" ] && TOTAL_W_TB=$(awk -v l="$MICRON_LBAS" 'BEGIN {printf "%.2f", (l * 512) / (1024*1024*1024*1024)}')
@@ -184,7 +183,7 @@ for d in $DISKS; do
             fi
         fi
 
-        [ -n "$TOTAL_W_FORMATTED" ] && echo -e " - 硬件终生累计写入 : ${C_CYAN}${TOTAL_W_FORMATTED} (TBW 写入量)${C_RESET}"
+        [ -n "$TOTAL_W_FORMATTED" ] && echo -e " - 硬件终生累计写入 : ${C_CYAN}${TOTAL_W_FORMATTED} (TBW 终生写入)${C_RESET}"
         [ -n "$TOTAL_R_FORMATTED" ] && echo -e " - 硬件终生累计读取 : ${C_CYAN}${TOTAL_R_FORMATTED}${C_RESET}"
     fi
     echo ""
@@ -193,12 +192,12 @@ done
 # 5. 磁盘 I/O 顺序写入性能测试
 echo -e "${C_YELLOW}[ 磁盘 I/O 顺序写入性能测试 ]${C_RESET}"
 TEST_TARGET="/tmp/io_test_file"
-IO_SPEED=$(dd if=/dev/zero of=${TEST_TARGET} bs=64k count=16k conv=fdatasync 2>&1 | awk -F, '{print $NF}' | sed 's/^[ \t]*//' | tr -d '\n')
+IO_SPEED=$(dd if=/dev/zero of=${TEST_TARGET} bs=64k count=16k conv=fdatasync 2>&1 | awk -F, 'END {print $NF}' | sed 's/^[ \t]*//' | tr -d '\n' || echo "未知")
 rm -f ${TEST_TARGET}
 echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
 echo ""
 
-# 6. 网络双向上传与下载测速 (Speedtest-CLI 官方引擎)
+# 6. 网络双向上传与下载测速 (Speedtest-CLI 动态优质节点)
 echo -e "${C_YELLOW}[ 全球节点上传与下载双向测速 ]${C_RESET}"
 
 SP_BIN="/tmp/speedtest"
@@ -212,7 +211,7 @@ fi
 
 if [ -x "$SP_BIN" ]; then
     echo -e "----------------------------------------------------------------------------------"
-    printf "%-18s %-16s %-16s %-16s %-10s\n" "测试节点" "所在区域" "上传速度" "下载速度" "网络延迟"
+    printf "%-22s %-16s %-16s %-16s %-10s\n" "测试节点" "所在区域" "上传速度" "下载速度" "网络延迟"
     echo -e "----------------------------------------------------------------------------------"
 
     test_sp() {
@@ -220,29 +219,35 @@ if [ -x "$SP_BIN" ]; then
         local region="$2"
         local s_id="$3"
 
-        local out=$($SP_BIN --accept-license --accept-gdpr -s "$s_id" -f json 2>/dev/null || true)
+        # 增加 8 秒超时，防止卡死
+        local out=$(timeout 10 $SP_BIN --accept-license --accept-gdpr -s "$s_id" -f json 2>/dev/null || true)
         local down_bytes=$(echo "$out" | grep -o '"download":{"bandwidth":[^,]*' | awk -F: '{print $3}' || echo 0)
         local up_bytes=$(echo "$out" | grep -o '"upload":{"bandwidth":[^,]*' | awk -F: '{print $3}' || echo 0)
         local lat=$(echo "$out" | grep -o '"latency":{"low":[^,]*,"high":[^,]*,"jitter":[^,]*,"iqm":[^,]*' | awk -F'"iqm":' '{print $2}' || awk -F'"latency":' '{print $2}' | cut -d',' -f1 || echo "")
         
         [ -z "$lat" ] && lat=$(echo "$out" | grep -o '"ping":{"jitter":[^,]*,"latency":[^}]*' | awk -F'"latency":' '{print $2}' | tr -d '}' || echo "")
 
-        local down_mbps="失败"
-        local up_mbps="失败"
+        local down_mbps="不可达"
+        local up_mbps="不可达"
         [ -n "$down_bytes" ] && [ "$down_bytes" != "0" ] && down_mbps=$(awk -v b="$down_bytes" 'BEGIN {printf "%.2f Mbps", (b*8)/1000/1000}')
         [ -n "$up_bytes" ] && [ "$up_bytes" != "0" ] && up_mbps=$(awk -v b="$up_bytes" 'BEGIN {printf "%.2f Mbps", (b*8)/1000/1000}')
         [ -n "$lat" ] && [ "$lat" != "null" ] && lat="$(awk -v l="$lat" 'BEGIN {printf "%.1f ms", l}')" || lat="N/A"
 
-        printf "%-18s %-16s %-16s %-16s %-10s\n" "$name" "$region" "$up_mbps" "$down_mbps" "$lat"
+        printf "%-22s %-16s %-16s %-16s %-10s\n" "$name" "$region" "$up_mbps" "$down_mbps" "$lat"
     }
 
-    test_sp "Clouvider"       "英国 伦敦"       "31010"
-    test_sp "fdcservers"      "德国 法兰克福"   "24447"
-    test_sp "Secura"          "美国 洛杉矶"     "44988"
-    test_sp "IPTELECOM"       "美国 纽约"       "29528"
-    test_sp "IPAAS"           "日本 东京"       "48463"
-    test_sp "Singtel"         "新加坡"         "13623"
-    test_sp "China Telecom"   "中国 上海"       "24447"
+    # 1. 自动测试最近的本地最佳测速点 (Nearest Auto)
+    test_sp "Local Auto Best"   "本地最佳节点"   ""
+    # 2. 欧洲优质节点 (德国 Hetzner / 英国)
+    test_sp "Hetzner Online"    "德国 纽伦堡"    "36295"
+    test_sp "Clouvider Ltd"     "英国 伦敦"      "31010"
+    # 3. 北美节点 (美国 洛杉矶 / 纽约)
+    test_sp "ReliableSite"      "美国 洛杉矶"    "15395"
+    test_sp "Secura Hosting"    "美国 纽约"      "44988"
+    # 4. 亚太优质节点 (日本 / 新加坡)
+    test_sp "IPAAS Co"          "日本 东京"      "48463"
+    test_sp "Singtel"           "新加坡"        "13623"
+    
     echo -e "----------------------------------------------------------------------------------"
 else
     echo -e " 无法获取测速组件，跳过网络测速。"
