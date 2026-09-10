@@ -6,12 +6,12 @@
 
 ## 📂 脚本目录清单
 
-### 1. Debian 12 自动化网络重装与安全加固 (`reinstall-debian.sh`)
+### 1. Debian 12 自动化网络重装与安全加固 (`debian.sh`)
 专为 VPS / 云服务器设计的一键重装与初始化脚本。支持全自动扩容、SSH 密钥认证、UFW 防火墙配置、Fail2ban 防爆破、Docker 容器部署与邮件防滥发规则、Komari 探针无感接入。
 
 **快速使用**：
 ```bash
-curl -sL https://raw.githubusercontent.com/noevers/linux-auto-scripts/main/reinstall-debian.sh | bash -s -- \
+curl -sL https://raw.githubusercontent.com/noevers/auto/main/debian.sh | bash -s -- \
   --port 2222 \
   --key "你的SSH公钥" \
   --endpoint "https://komari.example.com" \
