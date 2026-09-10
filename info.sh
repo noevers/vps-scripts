@@ -11,21 +11,22 @@ C_BLUE="\033[34m"
 C_CYAN="\033[36m"
 C_RESET="\033[0m"
 
-# 1. 忽略旧源过期检测，静默确保 smartctl 和 iperf3 存在
+# 1. 忽略旧源过期检测，静默确保 smartctl 和 jq 存在
 if command -v apt-get >/dev/null 2>&1; then
     echo 'Acquire::Check-Valid-Until "0";' > /etc/apt/apt.conf.d/99no-check-valid-until 2>/dev/null || true
-    if ! command -v smartctl >/dev/null 2>&1 || ! command -v iperf3 >/dev/null 2>&1; then
+    if ! command -v smartctl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
         apt-get update -o Acquire::Check-Valid-Until=false -y >/dev/null 2>&1 || true
-        apt-get install -y smartmontools iperf3 >/dev/null 2>&1 || true
+        apt-get install -y smartmontools jq >/dev/null 2>&1 || true
     fi
 fi
 
-# 若无 iperf3，自动拉取独立静态二进制 (YABS 官方 binary)
+# 2. 下载 YABS 官方原版静态编译 iperf3 (绝对兼容所有 Linux)
 IPERF_CMD="iperf3"
+mkdir -p /tmp/yabs_bin
 if ! command -v iperf3 >/dev/null 2>&1; then
-    curl -sLo /tmp/iperf3 https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf/iperf3_x64 || true
-    chmod +x /tmp/iperf3 2>/dev/null || true
-    [ -f /tmp/iperf3 ] && IPERF_CMD="/tmp/iperf3"
+    curl -sLo /tmp/yabs_bin/iperf3 https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf/iperf3_x64 || true
+    chmod +x /tmp/yabs_bin/iperf3 2>/dev/null || true
+    [ -f /tmp/yabs_bin/iperf3 ] && IPERF_CMD="/tmp/yabs_bin/iperf3"
 fi
 
 echo -e "${C_CYAN}==============================================================================${C_RESET}"
@@ -80,7 +81,7 @@ echo -e " 运营商 (ISP)   : ${C_CYAN}${ISP} (${ASN})${C_RESET}"
 echo -e " 所在区域       : ${C_CYAN}${LOCATION}${C_RESET}"
 echo ""
 
-echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与终生累计读写 (TBW) ]${C_RESET}"
+echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与真实累计写入 (TBW) ]${C_RESET}"
 DISKS=$(lsblk -d -n -o NAME,TYPE 2>/dev/null | awk '$2=="disk" && $1!~/^(ram|loop)/ {print $1}')
 
 for d in $DISKS; do
@@ -100,9 +101,9 @@ for d in $DISKS; do
             [ $REMAINING -lt 0 ] && REMAINING=0
             HEALTH_STATUS="${REMAINING}% (已磨损 ${PERCENT_USED}%)"
         else
-            WEAR_INDICATOR=$(echo "$SMART_INFO" | grep -E "Media_Wearout_Indicator|Wear_Range_Delta|Remaining_Lifetime_Perc|SSD_Life_Left" | awk '{print $4}' | head -n 1 || true)
-            if [ -n "$WEAR_INDICATOR" ] && [ "$WEAR_INDICATOR" -gt 0 ] 2>/dev/null; then
-                HEALTH_STATUS="${WEAR_INDICATOR}%"
+            WEAR_VAL=$(echo "$SMART_INFO" | grep -E "202 Percent_Lifetime_Used|202 Percent_Lifetime_Remain|Media_Wearout_Indicator|Wear_Range_Delta|SSD_Life_Left" | awk '{print $4}' | head -n 1 || true)
+            if [ -n "$WEAR_VAL" ] && [ "$WEAR_VAL" -gt 0 ] 2>/dev/null; then
+                HEALTH_STATUS="${WEAR_VAL}%"
             elif echo "$SMART_INFO" | grep -q "SMART overall-health self-assessment test result: PASSED"; then
                 HEALTH_STATUS="100% (SMART PASSED 良好)"
             fi
@@ -122,19 +123,16 @@ for d in $DISKS; do
         [ -z "$COUNT" ] && COUNT=$(echo "$SMART_INFO" | grep -i "Power Cycles:" | awk '{print $NF}' | tr -d ',' || true)
         [ -n "$COUNT" ] && echo -e "   - 通电次数    : ${C_GREEN}${COUNT} 次${C_RESET}"
         
-        # 4. 终生累计写入量 (TBW)
+        # 4. 终生累计写入量 (TBW) - 标准 512B 扇区精确换算
         NVME_WRITE=$(echo "$SMART_INFO" | grep -i "Data Units Written:" | awk '{print $4}' | tr -d ',' || true)
         if [ -n "$NVME_WRITE" ]; then
             TBW=$(awk -v w="$NVME_WRITE" 'BEGIN {printf "%.2f", (w*512*1000)/1000/1000/1000/1000}')
             echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
         else
-            LBA_W=$(echo "$SMART_INFO" | grep -E "Total_LBAs_Written|Host_Writes_GiB|Host_Writes" | awk '{print $NF}' || true)
+            LBA_W=$(echo "$SMART_INFO" | grep -E "241 Total_LBAs_Written|Total_LBAs_Written|Host_Writes_GiB|Host_Writes" | awk '{print $NF}' | tr -d ',' || true)
             if [ -n "$LBA_W" ] && [ "$LBA_W" -gt 0 ] 2>/dev/null; then
-                if echo "$MODEL" | grep -qi "Micron"; then
-                    TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba*32)/1024/1024}')
-                else
-                    TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba*512)/1024/1024/1024/1024}')
-                fi
+                # 标准 SATA SSD 均按 512B 扇区换算: LBA * 512 / 1024^4 = TB
+                TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba*512)/1024/1024/1024/1024}')
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
         fi
@@ -144,6 +142,12 @@ for d in $DISKS; do
         if [ -n "$NVME_READ" ]; then
             TBR=$(awk -v r="$NVME_READ" 'BEGIN {printf "%.2f", (r*512*1000)/1000/1000/1000/1000}')
             echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB${C_RESET}"
+        else
+            LBA_R=$(echo "$SMART_INFO" | grep -E "242 Total_LBAs_Read|Total_LBAs_Read" | awk '{print $NF}' | tr -d ',' || true)
+            if [ -n "$LBA_R" ] && [ "$LBA_R" -gt 0 ] 2>/dev/null; then
+                TBR=$(awk -v lba="$LBA_R" 'BEGIN {printf "%.2f", (lba*512)/1024/1024/1024/1024}')
+                echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB${C_RESET}"
+            fi
         fi
     fi
     echo ""
@@ -158,11 +162,27 @@ rm -f ${TEST_TARGET}
 echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
 echo ""
 
-# YABS 官方多节点 iperf3 测速模块 (1:1 原版逻辑)
+# YABS 官方原版标准 JSON 解析测速模块
 echo -e "${C_YELLOW}[ 全球节点上传与下载双向测速 (YABS 官方 iperf3 测速矩阵) ]${C_RESET}"
 echo -e "----------------------------------------------------------------------------------"
-printf "%-16s | %-24s | %-16s | %-16s | %-10s\n" "提供商" "所在区域" "发送/上传速率" "接收/下载速率" "网络延迟"
+printf "%-14s | %-22s | %-16s | %-16s | %-10s\n" "提供商" "所在区域" "发送/上传速率" "接收/下载速率" "网络延迟"
 echo -e "----------------------------------------------------------------------------------"
+
+format_speed() {
+    local bps="$1"
+    if [ -z "$bps" ] || [ "$bps" = "null" ] || [ "$bps" = "0" ]; then
+        echo "超时/不可达"
+    else
+        awk -v b="$bps" 'BEGIN {
+            mbps = b / 1000000;
+            if (mbps >= 1000) {
+                printf "%.2f Gbps", mbps / 1000
+            } else {
+                printf "%.2f Mbps", mbps
+            }
+        }'
+    fi
+}
 
 yabs_iperf() {
     local host="$1"
@@ -177,35 +197,31 @@ yabs_iperf() {
     local ping_ms=$(ping -c 2 -W 2 "$host" 2>/dev/null | awk -F'/' 'END {if (NF>4) printf "%.1f ms", $5; else echo "超时"}')
     [ -z "$ping_ms" ] && ping_ms="N/A"
 
-    # 上传 (Send)
-    local send_res="繁忙/不可达"
-    for try in 1 2 3; do
+    # 上传测试 (Send - JSON 模式)
+    local send_speed="超时/不可达"
+    for try in 1 2; do
         local port=$(( start_p + RANDOM % (end_p - start_p + 1) ))
-        local run_send=$(timeout 10 $IPERF_CMD -c "$host" -p "$port" -P 4 2>/dev/null || true)
-        if echo "$run_send" | grep -q "receiver"; then
-            send_res=$(echo "$run_send" | grep "SUM" | grep "receiver" | awk '{printf "%.2f %s", $6, $7}')
-            [ -n "$send_res" ] && break
-        elif echo "$run_send" | grep -q "0.00-"; then
-            send_res=$(echo "$run_send" | tail -n 3 | awk '{printf "%.2f %s", $7, $8}' | head -n 1)
-            [ -n "$send_res" ] && break
+        local json_out=$(timeout 8 $IPERF_CMD -4 -c "$host" -p "$port" -t 3 -P 2 -J 2>/dev/null || true)
+        local bps=$(echo "$json_out" | grep -o '"bits_per_second":[0-9.]*' | awk -F: 'END {print $2}' || true)
+        if [ -n "$bps" ]; then
+            send_speed=$(format_speed "$bps")
+            break
         fi
     done
 
-    # 下载 (Receive, -R)
-    local recv_res="繁忙/不可达"
-    for try in 1 2 3; do
+    # 下载测试 (Receive -R - JSON 模式)
+    local recv_speed="超时/不可达"
+    for try in 1 2; do
         local port=$(( start_p + RANDOM % (end_p - start_p + 1) ))
-        local run_recv=$(timeout 10 $IPERF_CMD -c "$host" -p "$port" -P 4 -R 2>/dev/null || true)
-        if echo "$run_recv" | grep -q "sender"; then
-            recv_res=$(echo "$run_recv" | grep "SUM" | grep "sender" | awk '{printf "%.2f %s", $6, $7}')
-            [ -n "$recv_res" ] && break
-        elif echo "$run_recv" | grep -q "0.00-"; then
-            recv_res=$(echo "$run_recv" | tail -n 3 | awk '{printf "%.2f %s", $7, $8}' | head -n 1)
-            [ -n "$recv_res" ] && break
+        local json_out=$(timeout 8 $IPERF_CMD -4 -c "$host" -p "$port" -t 3 -P 2 -R -J 2>/dev/null || true)
+        local bps=$(echo "$json_out" | grep -o '"bits_per_second":[0-9.]*' | awk -F: 'END {print $2}' || true)
+        if [ -n "$bps" ]; then
+            recv_speed=$(format_speed "$bps")
+            break
         fi
     done
 
-    printf "%-16s | %-24s | %-16s | %-16s | %-10s\n" "$provider" "$location" "$send_res" "$recv_res" "$ping_ms"
+    printf "%-14s | %-22s | %-16s | %-16s | %-10s\n" "$provider" "$location" "$send_speed" "$recv_speed" "$ping_ms"
 }
 
 yabs_iperf "lon.speedtest.clouvider.net" "5200-5209" "Clouvider" "英国 伦敦 (10G)"
@@ -213,7 +229,6 @@ yabs_iperf "iperf-ams-nl.eranium.net" "5201-5210" "Eranium" "荷兰 阿姆斯特
 yabs_iperf "speedtest.sin1.sg.leaseweb.net" "5201-5210" "Leaseweb" "新加坡 (10G)"
 yabs_iperf "la.speedtest.clouvider.net" "5200-5209" "Clouvider" "美国 洛杉矶 (10G)"
 yabs_iperf "speedtest.nyc1.us.leaseweb.net" "5201-5210" "Leaseweb" "美国 纽约 (10G)"
-yabs_iperf "speedtest.sao1.edgoo.net" "9204-9240" "Edgoo" "巴西 圣保罗 (1G)"
 
 echo -e "----------------------------------------------------------------------------------"
 echo -e "${C_GREEN}测试完成！${C_RESET}"
