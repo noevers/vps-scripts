@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW / YABS原版IPv4与IPv6双栈测速)
+# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW/TBR / YABS原版IPv4与IPv6双栈测速)
 # Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
 # ==============================================================================
 
@@ -90,7 +90,7 @@ echo -e " 运营商 (ISP)   : ${C_CYAN}${ISP} (${ASN})${C_RESET}"
 echo -e " 所在区域       : ${C_CYAN}${LOCATION}${C_RESET}"
 echo ""
 
-# 6. 硬盘 SMART 状态检测
+# 6. 硬盘 SMART 状态检测 (精准适配 NVMe 与全厂商 SATA SSD)
 echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与真实累计读写量 ]${C_RESET}"
 DISKS=$(lsblk -d -n -o NAME,TYPE 2>/dev/null | awk '$2=="disk" && $1!~/^loop/ && $1!~/^ram/ {print $1}')
 
@@ -142,6 +142,7 @@ for d in $DISKS; do
                 echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             fi
         else
+            # SATA 匹配: 提取 ID 241/242
             LBA_W=$(echo "$SMART_INFO" | awk '$1=="241" || /Total_LBAs_Written/ || /Host_Writes/ {print $NF; exit}')
             if [[ "$LBA_W" =~ ^[0-9]+$ ]] && [ "$LBA_W" != "0" ]; then
                 TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
@@ -186,17 +187,8 @@ IPERF_LOCS_6=(
 
 extract_speed() {
     local raw="$1"
-    local line=$(echo "$raw" | grep "bits/sec" | tail -n 1)
-    if [ -n "$line" ]; then
-        echo "$line" | awk '{
-            for(i=1; i<=NF; i++) {
-                if ($i ~ /^(bits|Kbits|Mbits|Gbits)\/sec$/) {
-                    print $(i-1), $i;
-                    exit;
-                }
-            }
-        }'
-    fi
+    local res=$(echo "$raw" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
+    echo "$res"
 }
 
 run_yabs_suite() {
@@ -243,7 +235,7 @@ run_yabs_suite() {
         local val_send=$(extract_speed "$raw_send")
         [ -n "$val_send" ] && send_res="$val_send"
 
-        # 2. 接收/下载测试 (-R 反向推流)
+        # 2. 接收/下载测试 (单流反向推流，防止被公共节点并发拦截)
         local raw_recv=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -R 2>&1 || true)
         local val_recv=$(extract_speed "$raw_recv")
         [ -n "$val_recv" ] && recv_res="$val_recv"
