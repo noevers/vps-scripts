@@ -142,7 +142,6 @@ for d in $DISKS; do
                 echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             fi
         else
-            # SATA 匹配: 优先找 ID 241/242 或包含 LBAs 的属性
             LBA_W=$(echo "$SMART_INFO" | awk '$1=="241" || /Total_LBAs_Written/ || /Host_Writes/ {print $NF; exit}')
             if [[ "$LBA_W" =~ ^[0-9]+$ ]] && [ "$LBA_W" != "0" ]; then
                 TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
@@ -185,6 +184,21 @@ IPERF_LOCS_6=(
     "Clouvider" "la.speedtest.clouvider.net" "5200-5209" "美国 (洛杉矶 10G)"
 )
 
+extract_speed() {
+    local raw="$1"
+    local line=$(echo "$raw" | grep "bits/sec" | tail -n 1)
+    if [ -n "$line" ]; then
+        echo "$line" | awk '{
+            for(i=1; i<=NF; i++) {
+                if ($i ~ /^(bits|Kbits|Mbits|Gbits)\/sec$/) {
+                    print $(i-1), $i;
+                    exit;
+                }
+            }
+        }'
+    fi
+}
+
 run_yabs_suite() {
     local IP_VER="$1"
     local -n LOCS="$2"
@@ -226,12 +240,12 @@ run_yabs_suite() {
 
         # 1. 发送/上传测试 (4 线程并发)
         local raw_send=$(timeout 8 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 2>&1 || true)
-        local val_send=$(echo "$raw_send" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
+        local val_send=$(extract_speed "$raw_send")
         [ -n "$val_send" ] && send_res="$val_send"
 
-        # 2. 接收/下载测试 (单流稳定反向推流，防止被公共节点并发拦截)
+        # 2. 接收/下载测试 (-R 反向推流)
         local raw_recv=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -R 2>&1 || true)
-        local val_recv=$(echo "$raw_recv" | grep -E "receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
+        local val_recv=$(extract_speed "$raw_recv")
         [ -n "$val_recv" ] && recv_res="$val_recv"
 
         printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "$provider" "$region" "$send_res" "$recv_res" "$ping_ms"
