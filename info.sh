@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW/TBR / YABS双栈IPv4与IPv6测速)
+# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW / YABS原版IPv4与IPv6双栈测速)
 # Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
 # ==============================================================================
 
@@ -91,7 +91,7 @@ echo -e " 所在区域       : ${C_CYAN}${LOCATION}${C_RESET}"
 echo ""
 
 # 6. 硬盘 SMART 状态检测
-echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与真实累计读写量 (TBW / TBR) ]${C_RESET}"
+echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与真实累计读写量 ]${C_RESET}"
 DISKS=$(lsblk -d -n -o NAME,TYPE 2>/dev/null | awk '$2=="disk" && $1!~/^loop/ && $1!~/^ram/ {print $1}')
 
 for d in $DISKS; do
@@ -105,18 +105,18 @@ for d in $DISKS; do
     if command -v smartctl >/dev/null 2>&1; then
         SMART_INFO=$(smartctl -a "$DEV" 2>/dev/null || true)
         
-        # 1. 通电时间
+        # 通电时间
         POH=$(echo "$SMART_INFO" | grep -iE "Power_On_Hours|Power On Hours" | awk '{print $NF}' | tr -d ',')
         if [[ "$POH" =~ ^[0-9]+$ ]]; then
             DAYS=$(awk -v h="$POH" 'BEGIN {printf "%.1f", h/24}')
             echo -e "   - 通电时间    : ${C_GREEN}${POH} 小时 (约 ${DAYS} 天)${C_RESET}"
         fi
         
-        # 2. 通电次数
+        # 通电次数
         CYCLE=$(echo "$SMART_INFO" | grep -iE "Power_Cycle_Count|Power Cycles" | awk '{print $NF}' | tr -d ',')
         [[ "$CYCLE" =~ ^[0-9]+$ ]] && echo -e "   - 通电次数    : ${C_GREEN}${CYCLE} 次${C_RESET}"
         
-        # 3. 健康度
+        # 健康度
         HEALTH="100%"
         PERCENT_USED=$(echo "$SMART_INFO" | grep -i "Percentage Used" | awk '{print $NF}' | tr -d '%')
         if [[ "$PERCENT_USED" =~ ^[0-9]+$ ]]; then
@@ -125,11 +125,11 @@ for d in $DISKS; do
             HEALTH="${REM}% (已磨损 ${PERCENT_USED}%)"
         else
             WEAR=$(echo "$SMART_INFO" | grep -E "Media_Wearout_Indicator|Wear_Range_Delta" | awk '{print $4}')
-            [[ "$WEAR" =~ ^[0-9]+$ ]] && HEALTH="${WEAR}%"
+            [ -n "$WEAR" ] && HEALTH="${WEAR}%"
         fi
         echo -e "   - 硬盘健康度  : ${C_GREEN}${HEALTH}${C_RESET}"
         
-        # 4. 终生写入与读取 (TBW / TBR)
+        # 终生总写入 (TBW) 与 终生总读取 (TBR)
         if [[ "$d" =~ ^nvme ]]; then
             WRITTEN_RAW=$(echo "$SMART_INFO" | grep -i "Data Units Written" | awk -F: '{print $2}' | awk '{print $1}' | tr -d ',')
             if [[ "$WRITTEN_RAW" =~ ^[0-9]+$ ]]; then
@@ -139,25 +139,27 @@ for d in $DISKS; do
             READ_RAW=$(echo "$SMART_INFO" | grep -i "Data Units Read" | awk -F: '{print $2}' | awk '{print $1}' | tr -d ',')
             if [[ "$READ_RAW" =~ ^[0-9]+$ ]]; then
                 TBR=$(awk -v r="$READ_RAW" 'BEGIN {printf "%.2f", (r * 1000 * 512) / (1024^4)}')
-                echo -e "   - 终生总读取  : ${C_CYAN}${TBR} TB (TBR)${C_RESET}"
+                echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             fi
         else
-            LBA_W=$(echo "$SMART_INFO" | grep -iE "Total_LBAs_Written|Host_Writes|Logical Sectors Written" | head -n1 | awk '{print $NF}')
-            if [[ "$LBA_W" =~ ^[0-9]+$ ]]; then
+            # SATA 匹配: 优先找 ID 241/242 或包含 LBAs 的属性
+            LBA_W=$(echo "$SMART_INFO" | awk '$1=="241" || /Total_LBAs_Written/ || /Host_Writes/ {print $NF; exit}')
+            if [[ "$LBA_W" =~ ^[0-9]+$ ]] && [ "$LBA_W" != "0" ]; then
                 TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
-            LBA_R=$(echo "$SMART_INFO" | grep -iE "Total_LBAs_Read|Host_Reads|Logical Sectors Read" | head -n1 | awk '{print $NF}')
-            if [[ "$LBA_R" =~ ^[0-9]+$ ]]; then
+            
+            LBA_R=$(echo "$SMART_INFO" | awk '$1=="242" || /Total_LBAs_Read/ || /Host_Reads/ {print $NF; exit}')
+            if [[ "$LBA_R" =~ ^[0-9]+$ ]] && [ "$LBA_R" != "0" ]; then
                 TBR=$(awk -v lba="$LBA_R" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
-                echo -e "   - 终生总读取  : ${C_CYAN}${TBR} TB (TBR)${C_RESET}"
+                echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             fi
         fi
     fi
     echo ""
 done
 
-# 7. 磁盘 I/O 写入性能
+# 7. 磁盘 I/O 顺序写入性能
 echo -e "${C_YELLOW}[ 磁盘 I/O 顺序写入性能测试 ]${C_RESET}"
 TEST_TARGET="/tmp/io_test_file"
 [ -d "/root" ] && TEST_TARGET="/root/io_test_file"
@@ -166,7 +168,7 @@ rm -f ${TEST_TARGET}
 echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
 echo ""
 
-# 8. YABS 官方原版双栈 iperf3 测速矩阵
+# 8. YABS 官方双栈 iperf3 测速
 IPERF_LOCS_4=(
     "Clouvider" "lon.speedtest.clouvider.net" "5200-5209" "英国 (伦敦 10G)"
     "Eranium" "ams.speedtest.clouvider.net" "5200-5209" "荷兰 (阿姆斯特丹 100G)"
@@ -195,13 +197,6 @@ run_yabs_suite() {
     printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "提供商" "所在区域" "发送/上传速率" "接收/下载速率" "网络延迟"
     echo -e "----------------------------------------------------------------------------------"
 
-    if [ "$IP_VER" = "IPv6" ] && [ -z "$IPV6_CHECK" ]; then
-        echo -e "  当前主机未分配公网 IPv6 地址，已跳过 IPv6 测速矩阵。"
-        echo -e "----------------------------------------------------------------------------------"
-        echo ""
-        return
-    fi
-
     local total_nodes=$((${#LOCS[@]} / 4))
     for ((i=0; i<total_nodes; i++)); do
         local provider="${LOCS[i*4]}"
@@ -229,14 +224,14 @@ run_yabs_suite() {
             chosen_port="$port_range"
         fi
 
-        # 发送/上传测试 (8 线程多流)
-        local raw_send=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 2>&1 || true)
+        # 1. 发送/上传测试 (4 线程并发)
+        local raw_send=$(timeout 8 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 2>&1 || true)
         local val_send=$(echo "$raw_send" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
         [ -n "$val_send" ] && send_res="$val_send"
 
-        # 接收/下载测试 (8 线程反向模式)
-        local raw_recv=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 -R 2>&1 || true)
-        local val_recv=$(echo "$raw_recv" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
+        # 2. 接收/下载测试 (单流稳定反向推流，防止被公共节点并发拦截)
+        local raw_recv=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -R 2>&1 || true)
+        local val_recv=$(echo "$raw_recv" | grep -E "receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
         [ -n "$val_recv" ] && recv_res="$val_recv"
 
         printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "$provider" "$region" "$send_res" "$recv_res" "$ping_ms"
@@ -245,7 +240,16 @@ run_yabs_suite() {
     echo ""
 }
 
-run_yabs_suite "IPv4" IPERF_LOCS_4
-run_yabs_suite "IPv6" IPERF_LOCS_6
+# 双栈判断并输出
+if [ "$IPV4" != "无 / 未分配" ]; then
+    run_yabs_suite "IPv4" IPERF_LOCS_4
+fi
+
+if [ "$IPV6" != "无 / 未分配" ]; then
+    run_yabs_suite "IPv6" IPERF_LOCS_6
+else
+    echo -e "${C_YELLOW}[ 全球节点上传与下载双向测速 (YABS 原版 IPv6) ]${C_RESET}"
+    echo -e " 当前主机未检测到可用公网 IPv6 地址，已自动跳过 IPv6 测速。\n"
+fi
 
 echo -e "${C_GREEN}测试完成！${C_RESET}"
