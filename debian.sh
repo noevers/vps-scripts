@@ -1,13 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-# Script: reinstall-debian.sh
-# Author: noevers
-# Description: Debian 12 自动化网络重装 + 安全加固 + Docker + Komari 探针一键初始化
+# Script Name: debian.sh
+# Description: Debian 12 自动化网络重装与安全加固 (无默认值，强制参数校验)
+# Repository:  https://github.com/noevers/vps-scripts
 # ==============================================================================
 set -e
 
-# --- 默认参数 ---
-SSH_PORT="2222"
+# --- 初始化变量（全部为空，杜绝默认值安全隐患） ---
+SSH_PORT=""
 SSH_KEY=""
 KOMARI_ENDPOINT=""
 KOMARI_TOKEN=""
@@ -15,31 +15,35 @@ KOMARI_TOKEN=""
 # 打印帮助信息
 usage() {
     cat << EOF
-================================================================================
-Debian 12 自动化重装与初始化部署脚本
-================================================================================
-用法:
-  curl -sL https://raw.githubusercontent.com/noevers/debian-auto-reinstall/main/reinstall-debian.sh | bash -s -- [选项]
+--------------------------------------------------------------------------------
+【使用说明】
+  bash $0 --port <端口> --key "<公钥>" --endpoint "<地址>" --token "<密钥>"
 
-选项:
-  -p, --port <端口>            设置自定义 SSH 端口 (默认: 2222)
-  -k, --key "<公钥内容>"       SSH 公钥 (如 ssh-ed25519 AAAA... 或 ssh-rsa AAAA...) [必填]
-  -e, --endpoint <地址>        Komari 探针面板地址 (如 https://komari.example.com) [必填]
-  -t, --token ***          Komari 探针机器 Token [必填]
+【必填参数列表】(所有参数均为必填，不传或缺失任何一项将拒绝执行):
+  -p, --port <端口>            自定义 SSH 端口 (必须为 1-65535 之间的纯数字)
+  -k, --key "<公钥>"           SSH 公钥内容 (以 ssh-ed25519 或 ssh-rsa 等开头)
+  -e, --endpoint "<地址>"      Komari 探针服务端地址 (如 https://komari.example.com)
+  -t, --token "<密钥>"         Komari 探针机器 Token
   -h, --help                   显示帮助信息
 
-使用示例:
-  curl -sL https://raw.githubusercontent.com/noevers/debian-auto-reinstall/main/reinstall-debian.sh | bash -s -- \\
+【执行示例】:
+  curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \\
     --port 2222 \\
-    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG..." \\
+    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5..." \\
     --endpoint "https://komari.example.com" \\
     --token "***"
-================================================================================
+--------------------------------------------------------------------------------
 EOF
-    exit 0
+    exit 1
 }
 
-# --- 解析参数 ---
+# 如果没有传递任何参数，直接显示帮助并退出
+if [ $# -eq 0 ]; then
+    echo "❌ 错误: 未检测到任何输入参数！为了服务器安全，本脚本拒绝无参数执行。"
+    usage
+fi
+
+# --- 解析命令行参数 ---
 while [[ $# -gt 0 ]]; do
     case $1 in
         -p|--port)
@@ -62,33 +66,65 @@ while [[ $# -gt 0 ]]; do
             usage
             ;;
         *)
-            echo "[错误] 未知参数: $1"
+            echo "❌ 错误: 未知参数 $1"
             usage
             ;;
     esac
 done
 
-# --- 校验必填项 ---
-if [ -z "$SSH_KEY" ]; then
-    echo "[错误] 必须提供 SSH 公钥 (--key 或 -k)！"
-    echo "提示: 本脚本完全禁用密码登录，不配置公钥将导致无法通过 SSH 连接。"
+# --- 严格校验每个必填参数 ---
+MISSING_ARGS=()
+
+# 1. 校验端口
+if [ -z "$SSH_PORT" ]; then
+    MISSING_ARGS+=("SSH 端口 (--port / -p)")
+elif ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [ "$SSH_PORT" -le 0 ] || [ "$SSH_PORT" -gt 65535 ]; then
+    echo "❌ 错误: SSH 端口必须是 1-65535 之间的合法数字，当前输入为: '$SSH_PORT'"
     exit 1
 fi
 
-if [ -z "$KOMARI_ENDPOINT" ] || [ -z "$KOMARI_TOKEN" ]; then
-    echo "[错误] 必须提供 Komari 探针地址 (--endpoint) 与 Token (--token)！"
+# 2. 校验公钥
+if [ -z "$SSH_KEY" ]; then
+    MISSING_ARGS+=("SSH 公钥 (--key / -k)")
+elif ! [[ "$SSH_KEY" =~ ^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521) ]]; then
+    echo "❌ 错误: SSH 公钥格式不正确！必须以 ssh-ed25519 / ssh-rsa 等标准公钥标识开头。"
     exit 1
+fi
+
+# 3. 校验 Komari 面板地址
+if [ -z "$KOMARI_ENDPOINT" ]; then
+    MISSING_ARGS+=("Komari 探针服务端地址 (--endpoint / -e)")
+elif ! [[ "$KOMARI_ENDPOINT" =~ ^https?:// ]]; then
+    echo "❌ 错误: Komari 探针服务端地址必须以 http:// 或 https:// 开头。"
+    exit 1
+fi
+
+# 4. 校验 Komari Token
+if [ -z "$KOMARI_TOKEN" ]; then
+    MISSING_ARGS+=("Komari 探针机器 Token (--token / -t)")
+fi
+
+# 如果有任何缺失项，统一拦截并报错
+if [ ${#MISSING_ARGS[@]} -ne 0 ]; then
+    echo "❌ 错误: 检测到以下必填参数未提供:"
+    for arg in "${MISSING_ARGS[@]}"; do
+        echo "   - $arg"
+    done
+    echo ""
+    echo "提示: 本脚本完全禁用密码登录。若缺失公钥或端口等参数会导致机器失联，因此强制全参数校验。"
+    usage
 fi
 
 echo "========================================================="
-echo " 即将开始 Debian 12 自动化网络重装与初始化:"
-echo " - SSH 端口:        ${SSH_PORT}"
-echo " - 认证方式:        仅密钥认证 (禁用密码登录)"
-echo " - Komari 探针地址: ${KOMARI_ENDPOINT}"
-echo " - 基础软件:        vim, curl, wget, unzip, sudo, git, htop 等"
-echo " - 安全防护:        UFW 防火墙 (80/443/SSH) + Fail2ban (3次即封)"
-echo " - 容器与规则:      Docker CE 最新版 + 拦截容器滥发邮件 + 阻断未授权端口"
-echo " - 拦截规则:        屏蔽 Vodafone 域名解析"
+echo " ✅ 所有参数校验通过，即将开始 Debian 12 自动化安装与加固:"
+echo " -------------------------------------------------------"
+echo " • SSH 端口:        ${SSH_PORT}"
+echo " • SSH 认证:        仅公钥认证 (已禁用密码)"
+echo " • Komari 探针:     ${KOMARI_ENDPOINT}"
+echo " • Komari Token:    ${KOMARI_TOKEN}"
+echo " • 防火墙与拦截:    UFW (放行 ${SSH_PORT}, 80, 443) / 阻断邮件端口"
+echo " • 暴力破解防护:    Fail2ban 错误 3 次封禁"
+echo " • 基础运行环境:    Docker CE, Compose, vim, curl, wget 等"
 echo "========================================================="
 sleep 3
 
@@ -105,7 +141,7 @@ users:
     ssh_authorized_keys:
       - ${SSH_KEY}
 
-# 开机自动安装基础工具
+# 开机预装软件包
 package_update: true
 package_upgrade: true
 packages:
@@ -159,23 +195,23 @@ runcmd:
     chmod +x /root/block_vodafone.sh
     bash /root/block_vodafone.sh
 
-  # 3. 配置 UFW 防火墙（宿主机仅放行自定义 SSH + 80 + 443）
+  # 3. 配置 UFW 防火墙（放行自定义 SSH + 80 + 443）
   - ufw default deny incoming
   - ufw default allow outgoing
   - ufw allow ${SSH_PORT}/tcp comment 'Custom SSH'
   - ufw allow 80/tcp comment 'HTTP'
   - ufw allow 443/tcp comment 'HTTPS'
 
-  # 4. 注入 Docker 安全规则（防滥发邮件 + 阻断外部越界访问容器端口）
+  # 4. 注入 Docker 防护与拦截邮件发信规则
   - |
     cat << 'RULES' >> /etc/ufw/after.rules
 
     # --- DOCKER 安全规则 (防滥发邮件 + 防端口越界暴露) ---
     *filter
     :DOCKER-USER - [0:0]
-    # 阻止容器通过 25, 465, 587, 2525 端口向外发垃圾邮件
+    # 阻止容器向外发送垃圾邮件 (25, 465, 587, 2525)
     -A DOCKER-USER -p tcp -m multiport --dports 25,465,587,2525 -j DROP
-    # 阻止外部通过 Docker 访问除 80, 443 以外的任何未授权映射
+    # 阻止外部通过 Docker 访问除 80, 443 以外的未授权映射
     -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
     -A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
     -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
@@ -191,7 +227,7 @@ runcmd:
   - systemctl enable fail2ban
   - systemctl restart fail2ban
 
-  # 6. 安装官方最新稳定版 Docker & Docker Compose
+  # 6. 安装官方最新 Docker & Docker Compose
   - install -m 0755 -d /etc/apt/keyrings
   - curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   - echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list
@@ -200,7 +236,7 @@ runcmd:
   - systemctl enable docker
   - systemctl start docker
 
-  # 7. 重新加载 UFW 让 Docker 链生效
+  # 7. 重载 UFW 规则
   - ufw reload
 
   # 8. 安装并启动 Komari Agent 探针
@@ -208,6 +244,6 @@ runcmd:
 EOF
 
 # --- 启动重装 ---
-echo ">>> 正在下载底层网络重装工具并启动 Debian 12 安装..."
+echo ">>> 正在下载官方网络重装工具并启动 Debian 12 安装..."
 curl -O https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh
 bash reinstall.sh debian 12 --cloud-data "$SEED_DIR"
