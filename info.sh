@@ -142,17 +142,25 @@ for d in $DISKS; do
                 echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             fi
         else
-            # SATA 匹配: 提取 ID 241/242
+            # SATA 写入匹配
             LBA_W=$(echo "$SMART_INFO" | awk '$1=="241" || /Total_LBAs_Written/ || /Host_Writes/ {print $NF; exit}')
             if [[ "$LBA_W" =~ ^[0-9]+$ ]] && [ "$LBA_W" != "0" ]; then
                 TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
             
-            LBA_R=$(echo "$SMART_INFO" | awk '$1=="242" || /Total_LBAs_Read/ || /Host_Reads/ {print $NF; exit}')
+            # SATA 读取匹配 (多层自适应兜底)
+            LBA_R=$(echo "$SMART_INFO" | awk '$1=="242" || /Total_LBAs_Read/ || /Host_Reads/ || /Lifetime_Reads/ {print $NF; exit}')
             if [[ "$LBA_R" =~ ^[0-9]+$ ]] && [ "$LBA_R" != "0" ]; then
                 TBR=$(awk -v lba="$LBA_R" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
+            else
+                # 若主控固件未开放 242 寄存器，自动提取内核层累计读取数据
+                BOOT_R_SECTORS=$(grep -w "$d" /proc/diskstats 2>/dev/null | awk '{print $6}')
+                if [[ "$BOOT_R_SECTORS" =~ ^[0-9]+$ ]] && [ "$BOOT_R_SECTORS" != "0" ]; then
+                    BOOT_GB=$(awk -v s="$BOOT_R_SECTORS" 'BEGIN {printf "%.2f", (s * 512) / (1024^3)}')
+                    echo -e "   - 累计总读取  : ${C_GREEN}${BOOT_GB} GB (本次开机读取/固件未开放出厂SMART读取计数)${C_RESET}"
+                fi
             fi
         fi
     fi
