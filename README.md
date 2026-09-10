@@ -11,7 +11,7 @@
 
 **快速使用**：
 ```bash
-curl -sL https://raw.githubusercontent.com/noevers/vps/main/debian.sh | bash -s -- \
+curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \
   --port 2222 \
   --key "你的SSH公钥" \
   --endpoint "https://komari.example.com" \
