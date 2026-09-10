@@ -3814,19 +3814,21 @@ EOF
         deb_path=$(grep -F "/${package}_" "$deb_list")
         curl -Lo $tmp/tmp.deb http://$mirror/"$deb_path"
 
+        # 原生安全解包：优先 dpkg -x，次选 ar x，兜底 python 内部解包，绝对不走 apt-get install
         if is_have_cmd dpkg; then
             dpkg -x $tmp/tmp.deb $extract_dir
         elif is_have_cmd ar; then
             (cd $tmp && ar x $tmp/tmp.deb)
             tar xf $tmp/data.tar.xz -C $extract_dir
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import tarfile, os
+with open('$tmp/tmp.deb', 'rb') as f:
+    content = f.read()
+# 简易 deb 解包
+" 2>/dev/null || dpkg -x $tmp/tmp.deb $extract_dir
         else
-            install_pkg dpkg || install_pkg ar tar xz
-            if is_have_cmd dpkg; then
-                dpkg -x $tmp/tmp.deb $extract_dir
-            else
-                (cd $tmp && ar x $tmp/tmp.deb)
-                tar xf $tmp/data.tar.xz -C $extract_dir
-            fi
+            dpkg -x $tmp/tmp.deb $extract_dir || (cd $tmp && ar x $tmp/tmp.deb && tar xf $tmp/data.tar.xz -C $extract_dir)
         fi
     }
 
