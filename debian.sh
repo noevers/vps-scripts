@@ -245,5 +245,5 @@ EOF
 
 # --- 启动重装 ---
 echo ">>> 正在下载官方网络重装工具并启动 Debian 12 安装..."
-curl -O https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh
+curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/core/reinstall.sh -o /tmp/reinstall.sh
 bash reinstall.sh debian 12 --cloud-data "$SEED_DIR"
