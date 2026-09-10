@@ -56,7 +56,7 @@ curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | 
    - 开机自动预装 `vim`, `curl`, `wget`, `unzip`, `sudo`, `git`, `htop`, `net-tools`, `ca-certificates` 等常用运维工具。
 3. **严格安全加固**：
    - **纯密钥登录**：彻底禁用密码登录与键盘交互式认证，修改自定义 SSH 端口。
-   - **Fail2ban 智能防爆破**：适配 Debian 12 `systemd-journald` 日志，**错误 3 次直接联动 UFW 封禁 1 天**。
+   - **Fail2ban 智能防爆破**：适配 Debian 12 `systemd-journald` 日志，**错误 3 次直接联动 UFW 永久封禁 (-1)**。
    - **Vodafone 拦截规则**：自动执行 hosts 域名拦截规则，防止滥用。
 4. **全方位出入站防火墙 (Anti-Abuse 防封号)**：
    - **入站白名单**：仅放行自定义 SSH 端口、80、443，阻断一切外部端口探测。
@@ -78,7 +78,7 @@ curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | 
 | **出站 (Outbound)** | 宿主机 & 容器 | 阻断: `TCP 25, 465, 587, 2525` | 阻止邮件滥发（Spam），防止 VPS 商家因 TOS 直接停机封号 |
 | **出站 (Outbound)** | 宿主机 & 容器 | 阻断: `TCP 135, 139, 445` / `UDP 137, 138` | 阻断 NetBIOS / SMB 蠕虫与勒索病毒对外传播扫描 |
 | **出站 (Outbound)** | 宿主机 & 容器 | 阻断: `TCP 3333, 4444, 5555, 7777, 9000, 14444` | 阻断被入侵挂马后的门罗币等 Stratum 协议挖矿连接 |
-| **防爆破 (Fail2ban)** | SSH 服务 | 错误 3 次拉黑 1 天（联动 UFW） | 彻底拦截 SSH 暴力破解尝试 |
+| **防爆破 (Fail2ban)** | SSH 服务 | 错误 3 次永久拉黑 (-1)（联动 UFW） | 彻底拦截 SSH 暴力破解尝试 |
 
 ---
 
