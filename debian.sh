@@ -282,15 +282,12 @@ runcmd:
   - curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "***}"
 EOF
 
-# --- 预先更新本地系统软件源与必要依赖 ---
-echo ">>> 正在更新本地软件包索引并准备必要构建工具..."
+# --- 修复旧系统源过期 & 准备环境 ---
+echo ">>> 正在准备基础运行环境..."
 if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -y || true
-    apt-get install -y binutils xz-utils tar || true
-elif command -v yum >/dev/null 2>&1; then
-    yum install -y binutils xz tar || true
-elif command -v apk >/dev/null 2>&1; then
-    apk add binutils xz tar || true
+    # 忽略 apt 仓库 Release 文件过期报错 (如旧系统 bullseye-security expired)
+    echo 'Acquire::Check-Valid-Until "0";' > /etc/apt/apt.conf.d/99no-check-valid-until 2>/dev/null || true
+    apt-get update -o Acquire::Check-Valid-Until=false -y || true
 fi
 
 # --- 启动自托管重装引擎 ---
