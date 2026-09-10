@@ -96,7 +96,7 @@ fi
 
 # 4. 探针 Token 校验
 if [ -z "$KOMARI_TOKEN" ]; then
-    ERRORS+=("缺少必填参数: -t / --token (未指定 Komari 探针机器 Token)")
+    ERRORS+=("缺少必填参数: -t / --token *** Komari 探针机器 Token)")
 fi
 
 # 如果有任何错误，直接终止执行
@@ -116,7 +116,7 @@ echo "✅ 参数校验通过，即将开始自动化装机与加固流程："
 echo "   - SSH 端口:        ${SSH_PORT}"
 echo "   - SSH 认证:        仅密钥认证 (公钥已校验)"
 echo "   - Komari 探针:     ${KOMARI_ENDPOINT}"
-echo "   - Fail2ban 规则:   失败 3 次封禁 1 天"
+echo "   - Fail2ban 规则:   失败 3 次永久封禁 (bantime = -1)"
 echo "   - 入站防火墙:      白名单放行 ${SSH_PORT}/tcp, 80/tcp, 443/tcp"
 echo "   - 出站防火墙:      阻断邮件滥发 (25/465/587/2525)、SMB蠕虫、矿池等高危端口"
 echo "   - Docker 防护:     UFW 统一纳管 + 拦截未授权端口 + 出站防封号"
@@ -165,12 +165,12 @@ write_files:
       KbdInteractiveAuthentication no
       PermitRootLogin prohibit-password
 
-  # Fail2ban 联动 UFW，错误 3 次直接封禁 1 天
+  # Fail2ban 联动 UFW，错误 3 次直接永久封禁 (-1)
   - path: /etc/fail2ban/jail.local
     permissions: '0644'
     content: |
       [DEFAULT]
-      bantime = 1d
+      bantime = -1
       findtime = 10m
       maxretry = 3
       banaction = ufw
