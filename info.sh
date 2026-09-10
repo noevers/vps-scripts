@@ -1,6 +1,7 @@
 #!/bin/bash
 # ==============================================================================
-# Script: info.sh (硬件概况 / 硬盘SMART通电与读写量 / Geekbench 5 / 上传下载双向测速)
+# Script: info.sh (硬件概况 / 硬盘SMART通电与读写量 / YABS 经典多节点 iperf3 上下行双向测速)
+# Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
 # ==============================================================================
 set -e
 
@@ -12,7 +13,7 @@ C_CYAN="\033[36m"
 C_RESET="\033[0m"
 
 echo -e "${C_CYAN}==============================================================================${C_RESET}"
-echo -e "${C_GREEN}            VPS / 救援模式 硬件信息、硬盘健康、GB5 与双向带宽测试            ${C_RESET}"
+echo -e "${C_GREEN}         VPS / 救援模式 硬件信息、硬盘健康与 YABS 标准网络测速          ${C_RESET}"
 echo -e "${C_CYAN}==============================================================================${C_RESET}"
 
 # 1. 基础系统与处理器信息
@@ -70,18 +71,15 @@ for d in $DISKS; do
         if echo "$SMART_INFO" | grep -qE "Power_On_Hours|Power_On_Time|Data Units Written|Data Units Read"; then
             FOUND_SMART=true
             echo -e " 盘符: ${C_GREEN}${DEV}${C_RESET}"
-            # 通电时间
             POWER_ON=$(echo "$SMART_INFO" | awk '/Power_On_Hours|Power_On_Time/ {print $10}' | head -n1)
             [ -z "$POWER_ON" ] && POWER_ON=$(echo "$SMART_INFO" | grep -i "Power On Hours:" | awk -F: '{print $2}' | tr -d ' ')
             if [ -n "$POWER_ON" ]; then
                 DAYS=$(awk -v h="$POWER_ON" 'BEGIN {printf "%.1f", h/24}')
                 echo -e " - 通电时间     : ${C_CYAN}${POWER_ON} 小时 (约 ${DAYS} 天)${C_RESET}"
             fi
-            # 通电次数
             POWER_COUNT=$(echo "$SMART_INFO" | awk '/Power_Cycle_Count/ {print $10}' | head -n1)
             [ -z "$POWER_COUNT" ] && POWER_COUNT=$(echo "$SMART_INFO" | grep -i "Power Cycles:" | awk -F: '{print $2}' | tr -d ' ')
             [ -n "$POWER_COUNT" ] && echo -e " - 通电次数     : ${C_CYAN}${POWER_COUNT} 次${C_RESET}"
-            # 读写量 (NVMe / SSD)
             WRITTEN_UNITS=$(echo "$SMART_INFO" | grep -i "Data Units Written:" | awk -F: '{print $2}' | awk '{print $1}' | tr -d ',')
             if [ -n "$WRITTEN_UNITS" ]; then
                 WRITTEN_TB=$(awk -v u="$WRITTEN_UNITS" 'BEGIN {printf "%.2f", (u * 512 * 1000) / (1024*1024*1024*1024)}')
@@ -91,12 +89,6 @@ for d in $DISKS; do
             if [ -n "$READ_UNITS" ]; then
                 READ_TB=$(awk -v u="$READ_UNITS" 'BEGIN {printf "%.2f", (u * 512 * 1000) / (1024*1024*1024*1024)}')
                 echo -e " - 累计读取量   : ${C_CYAN}${READ_TB} TB${C_RESET}"
-            fi
-            # 传统 SATA 写入统计 (LBAs Written)
-            LBA_W=$(echo "$SMART_INFO" | awk '/Total_LBAs_Written/ {print $10}' | head -n1)
-            if [ -n "$LBA_W" ]; then
-                LBA_TB=$(awk -v l="$LBA_W" 'BEGIN {printf "%.2f", (l * 512) / (1024*1024*1024*1024)}')
-                echo -e " - 累计写入量   : ${C_CYAN}${LBA_TB} TB${C_RESET}"
             fi
         fi
     fi
@@ -115,59 +107,66 @@ rm -f ${TEST_TARGET}
 echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
 echo ""
 
-# 5. 上传与下载 双向带宽测速 (集成 Ookla 官方独立客户端)
-echo -e "${C_YELLOW}[ 全球节点上传与下载双向带宽测速 ]${C_RESET}"
-if ! command -v speedtest >/dev/null 2>&1; then
-    if [ "$ARCH" = "x86_64" ]; then SP_ARCH="x86_64"; elif [ "$ARCH" = "aarch64" ]; then SP_ARCH="aarch64"; elif [ "$ARCH" = "i386" ]; then SP_ARCH="i386"; else SP_ARCH="x86_64"; fi
-    curl -sL "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${SP_ARCH}.tgz" | tar -xz -C /tmp speedtest 2>/dev/null || true
-fi
+# 5. YABS 经典标准：iperf3 全球节点上传与下载双向测速
+echo -e "${C_YELLOW}[ YABS 经典标准：全球节点上下行双向测速 (iperf3) ]${C_RESET}"
 
-if [ -f /tmp/speedtest ]; then
-    echo -e " 正在运行 Ookla 官方测速 (测量延迟 / 真实下载 / 真实上传)..."
-    /tmp/speedtest --accept-license --accept-gdpr -f human-readable 2>/dev/null | grep -E "Latency|Download|Upload|Packet Loss|Result URL" || echo "测速节点连接繁忙"
-    rm -f /tmp/speedtest
-else
-    echo -e "------------------------------------------------------------------------------"
-    printf "%-18s %-22s %-16s %-12s\n" "测试节点" "所在区域" "下载速度" "网络延迟"
-    echo -e "------------------------------------------------------------------------------"
-    test_speed() {
-        local node_name="$1"; local region="$2"; local url="$3"
-        local host=$(echo "$url" | awk -F/ '{print $3}' | awk -F: '{print $1}')
-        local ping_ms=$(ping -c 2 -W 2 "$host" 2>/dev/null | awk -F"/" 'END {if (NF>4) printf "%.1f ms", $5; else echo "超时"}')
-        [ -z "$ping_ms" ] && ping_ms="N/A"
-        local speed=$(curl -k -m 6 -sLo /dev/null -w "%{speed_download}" "$url" 2>/dev/null || echo 0)
-        local speed_mbps=$(awk -v s="$speed" 'BEGIN {printf "%.2f Mbps", s*8/1024/1024}')
-        printf "%-18s %-22s %-16s %-12s\n" "$node_name" "$region" "$speed_mbps" "$ping_ms"
-    }
-    test_speed "Cloudflare" "全球 CDN Anycast" "https://speed.cloudflare.com/__down?bytes=50000000"
-    test_speed "Hetzner" "欧洲 (德国 纽伦堡)" "https://fsn1-speed.hetzner.com/100MB.bin"
-    test_speed "Linode" "亚太 (日本 东京)" "http://speedtest.tokyo2.linode.com/100MB-tokyo2.bin"
-    test_speed "Linode" "北美 (美国 弗里蒙特)" "http://speedtest.fremont.linode.com/100MB-fremont.bin"
-    echo -e "------------------------------------------------------------------------------"
-fi
-echo ""
-
-# 6. Geekbench 5 CPU 综合跑分测试 (采用 YABS / GB5 经典标准)
-echo -e "${C_YELLOW}[ Geekbench 5 性能基准测试 (借用 YABS / GB5 引擎) ]${C_RESET}"
-read -r -t 15 -p "是否运行 Geekbench 5 跑分测试？[y/N] (默认 15 秒后跳过): " RUN_GB5 || RUN_GB5="n"
-if [[ "$RUN_GB5" =~ ^[Yy]$ ]]; then
-    echo ">>> 正在准备 Geekbench 5 测试组件..."
-    GB5_DIR="/tmp/geekbench5"
-    rm -rf "$GB5_DIR" && mkdir -p "$GB5_DIR"
+# 确保环境有 iperf3 (优先使用独立免依赖二进制)
+IPERF_BIN="/tmp/iperf3"
+if ! command -v iperf3 >/dev/null 2>&1 && [ ! -f "$IPERF_BIN" ]; then
     if [ "$ARCH" = "x86_64" ]; then
-        curl -sL "https://cdn.geekbench.com/Geekbench-5.5.1-Linux.tar.gz" | tar -xz -C "$GB5_DIR" --strip-components=1
+        curl -sL "https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf3_x86" -o "$IPERF_BIN" && chmod +x "$IPERF_BIN" 2>/dev/null || true
     elif [ "$ARCH" = "aarch64" ]; then
-        curl -sL "https://cdn.geekbench.com/Geekbench-5.5.1-LinuxARM.tar.gz" | tar -xz -C "$GB5_DIR" --strip-components=1
+        curl -sL "https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf3_arm" -o "$IPERF_BIN" && chmod +x "$IPERF_BIN" 2>/dev/null || true
     fi
-    if [ -f "$GB5_DIR/geekbench5" ]; then
-        "$GB5_DIR/geekbench5" --upload 2>&1 | tee /tmp/gb5_result.log | grep -E "Single-Core Score|Multi-Core Score|https://browser.geekbench.com" || true
-        rm -rf "$GB5_DIR"
-    else
-        echo "当前系统或架构不支持 Geekbench 5"
-    fi
-else
-    echo "已跳过 Geekbench 5 测试。"
 fi
+[ -x "$IPERF_BIN" ] && IPERF_CMD="$IPERF_BIN" || IPERF_CMD="iperf3"
 
-echo ""
+echo -e "----------------------------------------------------------------------------------"
+printf "%-18s %-20s %-14s %-14s %-10s\n" "测试节点" "所在区域" "发送 (上传)" "接收 (下载)" "延迟"
+echo -e "----------------------------------------------------------------------------------"
+
+test_yabs_node() {
+    local provider="$1"
+    local loc="$2"
+    local host="$3"
+    local port="$4"
+    local flags="$5"
+
+    local ping_val=$(ping -c 2 -W 2 "$host" 2>/dev/null | awk -F"/" 'END {if (NF>4) printf "%.1f ms", $5; else echo "超时"}')
+    [ -z "$ping_val" ] && ping_val="N/A"
+
+    if ! command -v "$IPERF_CMD" >/dev/null 2>&1 && [ ! -x "$IPERF_BIN" ]; then
+        printf "%-18s %-20s %-14s %-14s %-10s\n" "$provider" "$loc" "环境无iperf3" "环境无iperf3" "$ping_val"
+        return
+    fi
+
+    # 测试上传 (Client -> Server)
+    local up_json=$($IPERF_CMD -c "$host" -p "$port" -t 5 -P 2 -J $flags 2>/dev/null || true)
+    local up_speed=$(echo "$up_json" | grep -o '"bits_per_second":[^,]*' | tail -n1 | awk -F: '{print $2}' || echo "0")
+    local up_mbps="繁忙/失败"
+    if [ -n "$up_speed" ] && [ "$up_speed" != "0" ]; then
+        up_mbps=$(awk -v s="$up_speed" 'BEGIN {printf "%.2f Mbps", s/1000/1000}')
+    fi
+
+    # 测试下载 (Server -> Client 反向模式 -R)
+    local down_json=$($IPERF_CMD -c "$host" -p "$port" -t 5 -P 2 -R -J $flags 2>/dev/null || true)
+    local down_speed=$(echo "$down_json" | grep -o '"bits_per_second":[^,]*' | tail -n1 | awk -F: '{print $2}' || echo "0")
+    local down_mbps="繁忙/失败"
+    if [ -n "$down_speed" ] && [ "$down_speed" != "0" ]; then
+        down_mbps=$(awk -v s="$down_speed" 'BEGIN {printf "%.2f Mbps", s/1000/1000}')
+    fi
+
+    printf "%-18s %-20s %-14s %-14s %-10s\n" "$provider" "$loc" "$up_mbps" "$down_mbps" "$ping_val"
+}
+
+# 经典的 YABS 测速服务器节点列表 (亚太、北美、欧洲)
+test_yabs_node "Clouvider"     "英国 伦敦"        "lon.speedtest.clouvider.net" "5201" ""
+test_yabs_node "Clouvider"     "德国 法兰克福"    "fra.speedtest.clouvider.net" "5201" ""
+test_yabs_node "Clouvider"     "美国 纽约"        "nyc.speedtest.clouvider.net" "5201" ""
+test_yabs_node "Clouvider"     "美国 洛杉矶"      "la.speedtest.clouvider.net"  "5201" ""
+test_yabs_node "fdcservers"    "日本 东京"        "lg-tok.fdcservers.net"       "5201" ""
+test_yabs_node "fdcservers"    "新加坡"          "lg-sin.fdcservers.net"       "5201" ""
+test_yabs_node "Online.net"    "法国 巴黎"        "ping.online.net"             "5201" ""
+
+echo -e "----------------------------------------------------------------------------------"
 echo -e "${C_GREEN}====================== 全部测试流程已顺利完成 ======================${C_RESET}"
