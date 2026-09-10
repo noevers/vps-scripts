@@ -155,131 +155,109 @@ rm -rf "$SEED_DIR"
 mkdir -p "$SEED_DIR"
 
 cat << EOF > "$SEED_DIR/user-data"
-#cloud-config
-ssh_pwauth: false
-users:
-  - name: root
-    ssh_authorized_keys:
-      - ${SSH_KEY}
+#!/bin/bash
+set -x
+exec > /var/log/firstboot-setup.log 2>&1
 
-# 开机自动安装全部基础软件包
-package_update: true
-package_upgrade: true
-packages:
-  - vim
-  - curl
-  - wget
-  - unzip
-  - sudo
-  - git
-  - htop
-  - net-tools
-  - ca-certificates
-  - gnupg
-  - lsb-release
-  - ufw
-  - fail2ban
+echo ">>> 开始首次开机自动化配置..."
 
-write_files:
-  # SSH 仅密钥认证与自定义端口配置
-  - path: /etc/ssh/sshd_config.d/custom.conf
-    permissions: '0644'
-    content: |
-      Port ${SSH_PORT}
-      PasswordAuthentication no
-      KbdInteractiveAuthentication no
-      PermitRootLogin prohibit-password
+# 1. 设置 SSH 仅密钥认证与换端口
+mkdir -p /etc/ssh/sshd_config.d
+cat << 'SSH_CONF' > /etc/ssh/sshd_config.d/custom.conf
+Port ${SSH_PORT}
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+SSH_CONF
 
-  # Fail2ban 联动 UFW，错误 3 次永久封禁
-  - path: /etc/fail2ban/jail.local
-    permissions: '0644'
-    content: |
-      [DEFAULT]
-      bantime = -1
-      findtime = 10m
-      maxretry = 3
-      banaction = ufw
+# 确保 authorized_keys 写入
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+echo "${SSH_KEY}" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+systemctl restart ssh || systemctl restart sshd
 
-      [sshd]
-      enabled = true
-      port = ${SSH_PORT}
-      maxretry = 3
-      backend = systemd
+# 2. 刷新 apt 并安装基础工具全家桶
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get install -y vim curl wget unzip sudo git htop net-tools ca-certificates gnupg lsb-release ufw fail2ban
 
-runcmd:
-  # 1. 生效 SSH 配置
-  - systemctl restart ssh || systemctl restart sshd
-
-  # 2. 运行 Vodafone 域名拦截脚本
-  - |
-    wget -O /root/block_vodafone.sh https://raw.githubusercontent.com/noevers/AutoScripts/refs/heads/main/block_vodafone.sh
+# 3. 运行 Vodafone 域名拦截
+wget -O /root/block_vodafone.sh https://raw.githubusercontent.com/noevers/AutoScripts/refs/heads/main/block_vodafone.sh || true
+if [ -f /root/block_vodafone.sh ]; then
     chmod +x /root/block_vodafone.sh
-    bash /root/block_vodafone.sh
+    bash /root/block_vodafone.sh || true
+fi
 
-  # 3. 配置 UFW 防火墙基础规则（仅放行自定义 SSH + 80 + 443）
-  - ufw default deny incoming
-  - ufw default allow outgoing
-  - ufw allow ${SSH_PORT}/tcp comment 'Custom SSH'
-  - ufw allow 80/tcp comment 'HTTP'
-  - ufw allow 443/tcp comment 'HTTPS'
+# 4. 配置 Fail2ban 永久封禁
+cat << 'F2B' > /etc/fail2ban/jail.local
+[DEFAULT]
+bantime = -1
+findtime = 10m
+maxretry = 3
+banaction = ufw
 
-  # 4. 注入宿主机高危出站阻断规则
-  - ufw reject out 25/tcp comment 'Block SMTP Out'
-  - ufw reject out 465/tcp comment 'Block SMTPS Out'
-  - ufw reject out 587/tcp comment 'Block Submission Out'
-  - ufw reject out 2525/tcp comment 'Block Alternate SMTP Out'
-  - ufw reject out 135/tcp comment 'Block SMB/NetBIOS Out'
-  - ufw reject out 137/udp comment 'Block NetBIOS Out'
-  - ufw reject out 138/udp comment 'Block NetBIOS Out'
-  - ufw reject out 139/tcp comment 'Block NetBIOS Out'
-  - ufw reject out 445/tcp comment 'Block SMB Out'
-  - ufw reject out 3333/tcp comment 'Block Mining Out'
-  - ufw reject out 4444/tcp comment 'Block Mining Out'
-  - ufw reject out 5555/tcp comment 'Block Mining Out'
-  - ufw reject out 7777/tcp comment 'Block Mining Out'
-  - ufw reject out 9000/tcp comment 'Block Mining Out'
-  - ufw reject out 14444/tcp comment 'Block Mining Out'
+[sshd]
+enabled = true
+port = ${SSH_PORT}
+maxretry = 3
+backend = systemd
+F2B
+systemctl enable fail2ban
+systemctl restart fail2ban
 
-  # 5. 注入 Docker 容器级安全规则 (拦截邮件发信、矿池、未授权端口)
-  - |
-    cat << 'RULES' >> /etc/ufw/after.rules
+# 5. 配置 UFW 防火墙与高危出站拦截
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow ${SSH_PORT}/tcp comment 'Custom SSH'
+ufw allow 80/tcp comment 'HTTP'
+ufw allow 443/tcp comment 'HTTPS'
 
-    # --- DOCKER 安全规则 (防滥发邮件 + 防矿池 + 防未授权端口暴露) ---
-    *filter
-    :DOCKER-USER - [0:0]
-    # 阻止容器对外发垃圾邮件与勒索蠕虫
-    -A DOCKER-USER -p tcp -m multiport --dports 25,465,587,2525,135,139,445,3333,4444,5555,7777,9000,14444 -j DROP
-    -A DOCKER-USER -p udp -m multiport --dports 135,137,138,445 -j DROP
-    # 阻止外部通过 Docker 访问除 80, 443 以外的未授权映射
-    -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    -A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
-    -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
-    -A DOCKER-USER -i docker0 -j ACCEPT
-    -A DOCKER-USER -j DROP
-    COMMIT
-    RULES
+# 拦截高危出站
+ufw reject out 25/tcp comment 'Block SMTP Out' || true
+ufw reject out 465/tcp comment 'Block SMTPS Out' || true
+ufw reject out 587/tcp comment 'Block Submission Out' || true
+ufw reject out 2525/tcp comment 'Block Alternate SMTP Out' || true
+ufw reject out 135/tcp comment 'Block SMB Out' || true
+ufw reject out 137/udp comment 'Block NetBIOS Out' || true
+ufw reject out 138/udp comment 'Block NetBIOS Out' || true
+ufw reject out 139/tcp comment 'Block NetBIOS Out' || true
+ufw reject out 445/tcp comment 'Block SMB Out' || true
+ufw reject out 3333,4444,5555,7777,9000,14444/tcp comment 'Block Stratum Mining Out' || true
 
-  - ufw --force enable
-  - systemctl enable ufw
+# Docker 安全规则
+cat << 'RULES' >> /etc/ufw/after.rules
 
-  # 6. 启动 Fail2ban 防爆破
-  - systemctl enable fail2ban
-  - systemctl restart fail2ban
+# --- DOCKER 安全规则 (防滥发邮件 + 防端口越界暴露) ---
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -p tcp -m multiport --dports 25,465,587,2525,135,139,445,3333,4444,5555,7777,9000,14444 -j DROP
+-A DOCKER-USER -p udp -m multiport --dports 135,137,138,445 -j DROP
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+-A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
+-A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
+-A DOCKER-USER -i docker0 -j ACCEPT
+-A DOCKER-USER -j DROP
+COMMIT
+RULES
 
-  # 7. 安装官方最新稳定版 Docker & Docker Compose
-  - install -m 0755 -d /etc/apt/keyrings
-  - curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  - echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list
-  - apt-get update
-  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  - systemctl enable docker
-  - systemctl start docker
+ufw --force enable
+systemctl enable ufw
 
-  # 8. 重载 UFW 规则让 Docker 链生效
-  - ufw reload
+# 6. 安装官方最新 Docker & Docker Compose
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg || true
+echo "deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable docker
+systemctl start docker
+ufw reload
 
-  # 9. 安装并启动 Komari Agent 探针
-  - curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "***}"
+# 7. 安装并启动 Komari Agent 探针
+curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "${KOMARI_TOKEN}"
+
+echo ">>> 首次开机配置全部完成！"
 EOF
 
 # --- 修复旧系统源过期 & 准备环境 ---
