@@ -221,24 +221,37 @@ run_yabs_suite() {
         local send_res="超时/不可达"
         local recv_res="超时/不可达"
 
-        local chosen_port="5201"
+        # 生成端口探测列表 (端口池自动轮询探测，避免单端口被占报 busy)
+        local port_list=()
         if [[ "$port_range" =~ - ]]; then
             local p_min=$(echo "$port_range" | cut -d- -f1)
             local p_max=$(echo "$port_range" | cut -d- -f2)
-            chosen_port=$(shuf -i ${p_min}-${p_max} -n 1 2>/dev/null || echo "$p_min")
+            for ((p=p_min; p<=p_max; p++)); do
+                port_list+=($p)
+            done
         else
-            chosen_port="$port_range"
+            port_list+=("$port_range")
         fi
 
-        # 1. 发送/上传测试 (4 线程并发)
-        local raw_send=$(timeout 8 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 2>&1 || true)
-        local val_send=$(extract_speed "$raw_send")
-        [ -n "$val_send" ] && send_res="$val_send"
+        # 1. 发送/上传测试 (轮询可用端口)
+        for p in "${port_list[@]}"; do
+            local raw_send=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$p" -t 3 -P 4 2>&1 || true)
+            local val_send=$(extract_speed "$raw_send")
+            if [ -n "$val_send" ]; then
+                send_res="$val_send"
+                break
+            fi
+        done
 
-        # 2. 接收/下载测试 (单流反向推流，防止被公共节点并发拦截)
-        local raw_recv=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -R 2>&1 || true)
-        local val_recv=$(extract_speed "$raw_recv")
-        [ -n "$val_recv" ] && recv_res="$val_recv"
+        # 2. 接收/下载测试 (轮询可用端口)
+        for p in "${port_list[@]}"; do
+            local raw_recv=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$p" -t 3 -R 2>&1 || true)
+            local val_recv=$(extract_speed "$raw_recv")
+            if [ -n "$val_recv" ]; then
+                recv_res="$val_recv"
+                break
+            fi
+        done
 
         printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "$provider" "$region" "$send_res" "$recv_res" "$ping_ms"
     done
