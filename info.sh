@@ -3,7 +3,6 @@
 # Script: info.sh (硬件概况 / 内存频率 / 硬盘SMART健康度与TBW / YABS标准双向测速)
 # Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
 # ==============================================================================
-set -e
 
 C_RED="\033[31m"
 C_GREEN="\033[32m"
@@ -45,8 +44,8 @@ UPTIME=$(awk '{printf("%d天 %d小时 %d分钟",($1/60/60/24),($1/60/60%24),($1/
 MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
 MEM_USED=$(free -m | awk '/Mem:/ {print $3}')
 SWAP_TOTAL=$(free -m | awk '/Swap:/ {print $2}')
-MEM_FREQ=$(dmidecode -t memory 2>/dev/null | grep -i "Speed:" | grep -iv "Unknown" | head -n 1 | awk -F: '{print $2}' | sed 's/^[ \t]*//')
-MEM_TYPE=$(dmidecode -t memory 2>/dev/null | grep -i "Type:" | grep -iv "Unknown" | head -n 1 | awk -F: '{print $2}' | sed 's/^[ \t]*//')
+MEM_FREQ=$(dmidecode -t memory 2>/dev/null | grep -i "Speed:" | grep -iv "Unknown" | head -n 1 | awk -F: '{print $2}' | sed 's/^[ \t]*//' || true)
+MEM_TYPE=$(dmidecode -t memory 2>/dev/null | grep -i "Type:" | grep -iv "Unknown" | head -n 1 | awk -F: '{print $2}' | sed 's/^[ \t]*//' || true)
 [ -z "$MEM_FREQ" ] && MEM_FREQ="未知"
 [ -z "$MEM_TYPE" ] && MEM_TYPE="RAM"
 
@@ -59,8 +58,8 @@ LOCATION=$(curl -s4m 3 https://api.ip.sb/geoip | grep -o '"country":"[^"]*' | cu
 
 VIRT="物理机 (Dedicated / Bare Metal)"
 if command -v systemd-detect-virt >/dev/null 2>&1; then
-    DETECTED_VIRT=$(systemd-detect-virt)
-    [ "$DETECTED_VIRT" != "none" ] && VIRT="$DETECTED_VIRT"
+    DETECTED_VIRT=$(systemd-detect-virt 2>/dev/null || true)
+    [ -n "$DETECTED_VIRT" ] && [ "$DETECTED_VIRT" != "none" ] && VIRT="$DETECTED_VIRT"
 fi
 
 echo -e "${C_YELLOW}[ 基础硬件与系统架构 ]${C_RESET}"
@@ -95,13 +94,13 @@ for d in $DISKS; do
         
         # 1. 硬盘健康度 (Health / Wearout Percentage)
         HEALTH_STATUS="100%"
-        PERCENT_USED=$(echo "$SMART_INFO" | grep -i "Percentage Used:" | awk '{print $NF}' | tr -d '%')
-        if [ -n "$PERCENT_USED" ]; then
+        PERCENT_USED=$(echo "$SMART_INFO" | grep -i "Percentage Used:" | awk '{print $NF}' | tr -d '%' || true)
+        if [ -n "$PERCENT_USED" ] && [ "$PERCENT_USED" -ge 0 ] 2>/dev/null; then
             REMAINING=$((100 - PERCENT_USED))
             [ $REMAINING -lt 0 ] && REMAINING=0
             HEALTH_STATUS="${REMAINING}% (已磨损 ${PERCENT_USED}%)"
         else
-            WEAR_INDICATOR=$(echo "$SMART_INFO" | grep -E "Media_Wearout_Indicator|Wear_Range_Delta|Remaining_Lifetime_Perc|SSD_Life_Left" | awk '{print $4}' | head -n 1)
+            WEAR_INDICATOR=$(echo "$SMART_INFO" | grep -E "Media_Wearout_Indicator|Wear_Range_Delta|Remaining_Lifetime_Perc|SSD_Life_Left" | awk '{print $4}' | head -n 1 || true)
             if [ -n "$WEAR_INDICATOR" ] && [ "$WEAR_INDICATOR" -gt 0 ] 2>/dev/null; then
                 HEALTH_STATUS="${WEAR_INDICATOR}%"
             elif echo "$SMART_INFO" | grep -q "SMART overall-health self-assessment test result: PASSED"; then
@@ -111,25 +110,25 @@ for d in $DISKS; do
         echo -e "   - 硬盘健康度  : ${C_GREEN}${HEALTH_STATUS}${C_RESET}"
 
         # 2. 通电时间
-        HOURS=$(echo "$SMART_INFO" | grep -i "Power_On_Hours" | awk '{print $NF}')
-        [ -z "$HOURS" ] && HOURS=$(echo "$SMART_INFO" | grep -i "Power On Hours:" | awk '{print $NF}' | tr -d ',')
+        HOURS=$(echo "$SMART_INFO" | grep -i "Power_On_Hours" | awk '{print $NF}' || true)
+        [ -z "$HOURS" ] && HOURS=$(echo "$SMART_INFO" | grep -i "Power On Hours:" | awk '{print $NF}' | tr -d ',' || true)
         if [ -n "$HOURS" ] && [ "$HOURS" -gt 0 ] 2>/dev/null; then
             DAYS=$(awk -v h="$HOURS" 'BEGIN {printf "%.1f", h/24}')
             echo -e "   - 通电时间    : ${C_GREEN}${HOURS} 小时 (约 ${DAYS} 天)${C_RESET}"
         fi
         
         # 3. 通电次数
-        COUNT=$(echo "$SMART_INFO" | grep -i "Power_Cycle_Count" | awk '{print $NF}')
-        [ -z "$COUNT" ] && COUNT=$(echo "$SMART_INFO" | grep -i "Power Cycles:" | awk '{print $NF}' | tr -d ',')
+        COUNT=$(echo "$SMART_INFO" | grep -i "Power_Cycle_Count" | awk '{print $NF}' || true)
+        [ -z "$COUNT" ] && COUNT=$(echo "$SMART_INFO" | grep -i "Power Cycles:" | awk '{print $NF}' | tr -d ',' || true)
         [ -n "$COUNT" ] && echo -e "   - 通电次数    : ${C_GREEN}${COUNT} 次${C_RESET}"
         
         # 4. 终生累计写入量 (TBW)
-        NVME_WRITE=$(echo "$SMART_INFO" | grep -i "Data Units Written:" | awk '{print $4}' | tr -d ',')
+        NVME_WRITE=$(echo "$SMART_INFO" | grep -i "Data Units Written:" | awk '{print $4}' | tr -d ',' || true)
         if [ -n "$NVME_WRITE" ]; then
             TBW=$(awk -v w="$NVME_WRITE" 'BEGIN {printf "%.2f", (w*512*1000)/1000/1000/1000/1000}')
             echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
         else
-            LBA_W=$(echo "$SMART_INFO" | grep -E "Total_LBAs_Written|Host_Writes_GiB|Host_Writes" | awk '{print $NF}')
+            LBA_W=$(echo "$SMART_INFO" | grep -E "Total_LBAs_Written|Host_Writes_GiB|Host_Writes" | awk '{print $NF}' || true)
             if [ -n "$LBA_W" ] && [ "$LBA_W" -gt 0 ] 2>/dev/null; then
                 if echo "$MODEL" | grep -qi "Micron"; then
                     TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba*32)/1024/1024}')
@@ -141,7 +140,7 @@ for d in $DISKS; do
         fi
         
         # 5. 终生累计读取量
-        NVME_READ=$(echo "$SMART_INFO" | grep -i "Data Units Read:" | awk '{print $4}' | tr -d ',')
+        NVME_READ=$(echo "$SMART_INFO" | grep -i "Data Units Read:" | awk '{print $4}' | tr -d ',' || true)
         if [ -n "$NVME_READ" ]; then
             TBR=$(awk -v r="$NVME_READ" 'BEGIN {printf "%.2f", (r*512*1000)/1000/1000/1000/1000}')
             echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB${C_RESET}"
