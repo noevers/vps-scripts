@@ -282,6 +282,17 @@ runcmd:
   - curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "***}"
 EOF
 
+# --- 预先更新本地系统软件源与必要依赖 ---
+echo ">>> 正在更新本地软件包索引并准备必要构建工具..."
+if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y || true
+    apt-get install -y binutils xz-utils tar || true
+elif command -v yum >/dev/null 2>&1; then
+    yum install -y binutils xz tar || true
+elif command -v apk >/dev/null 2>&1; then
+    apk add binutils xz tar || true
+fi
+
 # --- 启动自托管重装引擎 ---
 echo ">>> 正在启动自托管重装引擎 (core/reinstall.sh)..."
 curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/core/reinstall.sh" -o /tmp/reinstall.sh
