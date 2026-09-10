@@ -90,7 +90,7 @@ echo -e " 运营商 (ISP)   : ${C_CYAN}${ISP} (${ASN})${C_RESET}"
 echo -e " 所在区域       : ${C_CYAN}${LOCATION}${C_RESET}"
 echo ""
 
-# 6. 硬盘 SMART 状态检测 (精准适配 NVMe 与全厂商 SATA SSD)
+# 6. 硬盘 SMART 状态检测
 echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与真实累计读写量 ]${C_RESET}"
 DISKS=$(lsblk -d -n -o NAME,TYPE 2>/dev/null | awk '$2=="disk" && $1!~/^loop/ && $1!~/^ram/ {print $1}')
 
@@ -149,13 +149,13 @@ for d in $DISKS; do
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
             
-            # SATA 读取匹配 (多层自适应兜底)
-            LBA_R=$(echo "$SMART_INFO" | awk '$1=="242" || /Total_LBAs_Read/ || /Host_Reads/ || /Lifetime_Reads/ {print $NF; exit}')
+            # SATA 读取匹配 (适配 ID 242, 246, 248 或包含 Reads 的所有属性)
+            LBA_R=$(echo "$SMART_INFO" | awk '$1=="242" || $1=="246" || $1=="248" || /Total_LBAs_Read/ || /Host_Reads/ || /Lifetime_Reads/ || /Cumulative_Host_Sectors_Read/ {print $NF; exit}')
             if [[ "$LBA_R" =~ ^[0-9]+$ ]] && [ "$LBA_R" != "0" ]; then
                 TBR=$(awk -v lba="$LBA_R" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             else
-                # 若主控固件未开放 242 寄存器，自动提取内核层累计读取数据
+                # 若固件出厂未开放总读取寄存器，提取内核层开机以来的累计读取数据
                 BOOT_R_SECTORS=$(grep -w "$d" /proc/diskstats 2>/dev/null | awk '{print $6}')
                 if [[ "$BOOT_R_SECTORS" =~ ^[0-9]+$ ]] && [ "$BOOT_R_SECTORS" != "0" ]; then
                     BOOT_GB=$(awk -v s="$BOOT_R_SECTORS" 'BEGIN {printf "%.2f", (s * 512) / (1024^3)}')
@@ -171,7 +171,7 @@ done
 echo -e "${C_YELLOW}[ 磁盘 I/O 顺序写入性能测试 ]${C_RESET}"
 TEST_TARGET="/tmp/io_test_file"
 [ -d "/root" ] && TEST_TARGET="/root/io_test_file"
-IO_SPEED=$(dd if=/dev/zero of=${TEST_TARGET} bs=64k count=16k conv=fdatasync 2>&1 | awk -F, '{print $NF}' | sed 's/^[ \t]*//')
+IO_SPEED=$(dd if=/dev/zero of=${TEST_TARGET} bs=64k count=16k conv=fdatasync 2>&1 | awk -F, 'END {print $NF}' | sed 's/^[ \t]*//')
 rm -f ${TEST_TARGET}
 echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
 echo ""
@@ -229,7 +229,7 @@ run_yabs_suite() {
         local send_res="超时/不可达"
         local recv_res="超时/不可达"
 
-        # 生成端口探测列表 (端口池自动轮询探测，避免单端口被占报 busy)
+        # 端口池自动探测
         local port_list=()
         if [[ "$port_range" =~ - ]]; then
             local p_min=$(echo "$port_range" | cut -d- -f1)
@@ -241,7 +241,7 @@ run_yabs_suite() {
             port_list+=("$port_range")
         fi
 
-        # 1. 发送/上传测试 (轮询可用端口)
+        # 1. 发送/上传测试
         for p in "${port_list[@]}"; do
             local raw_send=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$p" -t 3 -P 4 2>&1 || true)
             local val_send=$(extract_speed "$raw_send")
@@ -251,7 +251,7 @@ run_yabs_suite() {
             fi
         done
 
-        # 2. 接收/下载测试 (轮询可用端口)
+        # 2. 接收/下载测试
         for p in "${port_list[@]}"; do
             local raw_recv=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$p" -t 3 -R 2>&1 || true)
             local val_recv=$(extract_speed "$raw_recv")
@@ -267,7 +267,6 @@ run_yabs_suite() {
     echo ""
 }
 
-# 双栈判断并输出
 if [ "$IPV4" != "无 / 未分配" ]; then
     run_yabs_suite "IPv4" IPERF_LOCS_4
 fi
