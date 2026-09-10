@@ -124,9 +124,9 @@ elif ! echo "$KOMARI_ENDPOINT" | grep -qE '^https?://'; then
     ERRORS+=("参数错误: --endpoint 必须是以 http:// 或 https:// 开头的合法 URL (当前值: '$KOMARI_ENDPOINT')")
 fi
 
-# 4. 探针 Token 校验
-if [ -z "$KOMARI_TOKEN" ]; then
-    ERRORS+=("缺少必填参数: -t / --token (未指定 Komari 探针 Token)")
+# 4. 探针认证校验 (二选一)
+if [ -z "$KOMARI_TOKEN" ] && [ -z "$KOMARI_AUTO_DISCOVERY" ]; then
+    ERRORS+=("缺少探针认证参数: 必须指定 -a/--auto-discovery 或 -t/--token")
 fi
 
 # 如果存在校验错误，拒绝执行并退出
