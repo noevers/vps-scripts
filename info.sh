@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW / YABS原版IPv4与IPv6双栈测速)
+# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW/TBR / YABS双栈IPv4与IPv6测速)
 # Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
 # ==============================================================================
 
@@ -107,48 +107,48 @@ for d in $DISKS; do
         
         # 1. 通电时间
         POH=$(echo "$SMART_INFO" | grep -iE "Power_On_Hours|Power On Hours" | awk '{print $NF}' | tr -d ',')
-        if [ -n "$POH" ] && [ "$POH" -eq "$POH" ] 2>/dev/null; then
+        if [[ "$POH" =~ ^[0-9]+$ ]]; then
             DAYS=$(awk -v h="$POH" 'BEGIN {printf "%.1f", h/24}')
             echo -e "   - 通电时间    : ${C_GREEN}${POH} 小时 (约 ${DAYS} 天)${C_RESET}"
         fi
         
         # 2. 通电次数
         CYCLE=$(echo "$SMART_INFO" | grep -iE "Power_Cycle_Count|Power Cycles" | awk '{print $NF}' | tr -d ',')
-        [ -n "$CYCLE" ] && echo -e "   - 通电次数    : ${C_GREEN}${CYCLE} 次${C_RESET}"
+        [[ "$CYCLE" =~ ^[0-9]+$ ]] && echo -e "   - 通电次数    : ${C_GREEN}${CYCLE} 次${C_RESET}"
         
         # 3. 健康度
         HEALTH="100%"
         PERCENT_USED=$(echo "$SMART_INFO" | grep -i "Percentage Used" | awk '{print $NF}' | tr -d '%')
-        if [ -n "$PERCENT_USED" ] && [ "$PERCENT_USED" -eq "$PERCENT_USED" ] 2>/dev/null; then
+        if [[ "$PERCENT_USED" =~ ^[0-9]+$ ]]; then
             REM=$((100 - PERCENT_USED))
             [ $REM -lt 0 ] && REM=0
             HEALTH="${REM}% (已磨损 ${PERCENT_USED}%)"
         else
             WEAR=$(echo "$SMART_INFO" | grep -E "Media_Wearout_Indicator|Wear_Range_Delta" | awk '{print $4}')
-            [ -n "$WEAR" ] && HEALTH="${WEAR}%"
+            [[ "$WEAR" =~ ^[0-9]+$ ]] && HEALTH="${WEAR}%"
         fi
         echo -e "   - 硬盘健康度  : ${C_GREEN}${HEALTH}${C_RESET}"
         
-        # 4. 终生写入与读取
+        # 4. 终生写入与读取 (TBW / TBR)
         if [[ "$d" =~ ^nvme ]]; then
             WRITTEN_RAW=$(echo "$SMART_INFO" | grep -i "Data Units Written" | awk -F: '{print $2}' | awk '{print $1}' | tr -d ',')
-            if [ -n "$WRITTEN_RAW" ] && [ "$WRITTEN_RAW" -eq "$WRITTEN_RAW" ] 2>/dev/null; then
+            if [[ "$WRITTEN_RAW" =~ ^[0-9]+$ ]]; then
                 TBW=$(awk -v w="$WRITTEN_RAW" 'BEGIN {printf "%.2f", (w * 1000 * 512) / (1024^4)}')
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
             READ_RAW=$(echo "$SMART_INFO" | grep -i "Data Units Read" | awk -F: '{print $2}' | awk '{print $1}' | tr -d ',')
-            if [ -n "$READ_RAW" ] && [ "$READ_RAW" -eq "$READ_RAW" ] 2>/dev/null; then
+            if [[ "$READ_RAW" =~ ^[0-9]+$ ]]; then
                 TBR=$(awk -v r="$READ_RAW" 'BEGIN {printf "%.2f", (r * 1000 * 512) / (1024^4)}')
                 echo -e "   - 终生总读取  : ${C_CYAN}${TBR} TB (TBR)${C_RESET}"
             fi
         else
             LBA_W=$(echo "$SMART_INFO" | grep -iE "Total_LBAs_Written|Host_Writes|Logical Sectors Written" | head -n1 | awk '{print $NF}')
-            if [ -n "$LBA_W" ] && [ "$LBA_W" -eq "$LBA_W" ] 2>/dev/null; then
+            if [[ "$LBA_W" =~ ^[0-9]+$ ]]; then
                 TBW=$(awk -v lba="$LBA_W" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
             LBA_R=$(echo "$SMART_INFO" | grep -iE "Total_LBAs_Read|Host_Reads|Logical Sectors Read" | head -n1 | awk '{print $NF}')
-            if [ -n "$LBA_R" ] && [ "$LBA_R" -eq "$LBA_R" ] 2>/dev/null; then
+            if [[ "$LBA_R" =~ ^[0-9]+$ ]]; then
                 TBR=$(awk -v lba="$LBA_R" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总读取  : ${C_CYAN}${TBR} TB (TBR)${C_RESET}"
             fi
@@ -166,7 +166,7 @@ rm -f ${TEST_TARGET}
 echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
 echo ""
 
-# 8. YABS 官方原版双栈 iperf3 测速
+# 8. YABS 官方原版双栈 iperf3 测速矩阵
 IPERF_LOCS_4=(
     "Clouvider" "lon.speedtest.clouvider.net" "5200-5209" "英国 (伦敦 10G)"
     "Eranium" "ams.speedtest.clouvider.net" "5200-5209" "荷兰 (阿姆斯特丹 100G)"
@@ -194,6 +194,13 @@ run_yabs_suite() {
     echo -e "----------------------------------------------------------------------------------"
     printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "提供商" "所在区域" "发送/上传速率" "接收/下载速率" "网络延迟"
     echo -e "----------------------------------------------------------------------------------"
+
+    if [ "$IP_VER" = "IPv6" ] && [ -z "$IPV6_CHECK" ]; then
+        echo -e "  当前主机未分配公网 IPv6 地址，已跳过 IPv6 测速矩阵。"
+        echo -e "----------------------------------------------------------------------------------"
+        echo ""
+        return
+    fi
 
     local total_nodes=$((${#LOCS[@]} / 4))
     for ((i=0; i<total_nodes; i++)); do
@@ -238,7 +245,7 @@ run_yabs_suite() {
     echo ""
 }
 
-[ -n "$IPV4_CHECK" ] && run_yabs_suite "IPv4" IPERF_LOCS_4
-[ -n "$IPV6_CHECK" ] && run_yabs_suite "IPv6" IPERF_LOCS_6
+run_yabs_suite "IPv4" IPERF_LOCS_4
+run_yabs_suite "IPv6" IPERF_LOCS_6
 
 echo -e "${C_GREEN}测试完成！${C_RESET}"
