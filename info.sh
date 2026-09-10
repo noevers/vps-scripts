@@ -230,12 +230,12 @@ run_yabs_suite() {
         fi
 
         # 发送/上传测试 (8 线程多流)
-        local raw_send=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 4 -P 8 2>&1 || true)
+        local raw_send=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 2>&1 || true)
         local val_send=$(echo "$raw_send" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
         [ -n "$val_send" ] && send_res="$val_send"
 
         # 接收/下载测试 (8 线程反向模式)
-        local raw_recv=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 4 -P 8 -R 2>&1 || true)
+        local raw_recv=$(timeout 10 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$chosen_port" -t 3 -P 4 -R 2>&1 || true)
         local val_recv=$(echo "$raw_recv" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
         [ -n "$val_recv" ] && recv_res="$val_recv"
 
