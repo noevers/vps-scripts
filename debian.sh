@@ -285,4 +285,4 @@ EOF
 # --- 启动自托管重装引擎 ---
 echo ">>> 正在启动自托管重装引擎 (core/reinstall.sh)..."
 curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/core/reinstall.sh" -o /tmp/reinstall.sh
-bash /tmp/reinstall.sh debian 12 --cloud-data "$SEED_DIR"
+bash /tmp/reinstall.sh debian 12 --username root --password "" --ssh-key "$SSH_KEY" --cloud-data "$SEED_DIR"
