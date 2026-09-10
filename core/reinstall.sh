@@ -3814,18 +3814,19 @@ EOF
         deb_path=$(grep -F "/${package}_" "$deb_list")
         curl -Lo $tmp/tmp.deb http://$mirror/"$deb_path"
 
-        if false; then
-            # 使用 dpkg
-            # cygwin 没有 dpkg
-            install_pkg dpkg
+        if is_have_cmd dpkg; then
             dpkg -x $tmp/tmp.deb $extract_dir
-        else
-            # 使用 ar tar xz
-            # cygwin 需安装 binutils
-            # centos7 ar 不支持 --output
-            install_pkg ar tar xz
+        elif is_have_cmd ar; then
             (cd $tmp && ar x $tmp/tmp.deb)
             tar xf $tmp/data.tar.xz -C $extract_dir
+        else
+            install_pkg dpkg || install_pkg ar tar xz
+            if is_have_cmd dpkg; then
+                dpkg -x $tmp/tmp.deb $extract_dir
+            else
+                (cd $tmp && ar x $tmp/tmp.deb)
+                tar xf $tmp/data.tar.xz -C $extract_dir
+            fi
         fi
     }
 
