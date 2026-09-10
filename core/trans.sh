@@ -3212,7 +3212,7 @@ create_part() {
     update_part
 
     # alpine 删除分区工具，防止 256M 小机爆内存
-    # setup-disk /dev/sda 会保留格式化工具，我们也保留
+    # setup-disk /dev/sda 会保留格式���工具，我们也保留
     if [ "$distro" = alpine ]; then
         apk del parted
     fi
@@ -5467,7 +5467,7 @@ EOF
             if false; then
                 # anolis/openeuler/opencloudos 可能要安装 cloud-init
                 # opencloudos 无法使用 chroot $os_dir command -v xxx
-                # chroot: failed to run command ‘command’: No such file or directory
+                # chroot: failed to run command ���command’: No such file or directory
                 # 注意还要禁用 cloud-init 服务
                 if ! is_have_cmd_on_disk $os_dir cloud-init; then
                     chroot_dnf install cloud-init
