@@ -11,6 +11,7 @@ SSH_PORT=""
 SSH_KEY=""
 KOMARI_ENDPOINT=""
 KOMARI_TOKEN=""
+KOMARI_AUTO_DISCOVERY=""
 
 # 打印帮助信息
 usage() {
@@ -78,6 +79,10 @@ while [ $# -gt 0 ]; do
             ;;
         -t|--token)
             KOMARI_TOKEN="$2"
+            shift 2
+            ;;
+        -a|--auto-discovery)
+            KOMARI_AUTO_DISCOVERY="$2"
             shift 2
             ;;
         --token=*)
@@ -255,7 +260,11 @@ systemctl start docker
 ufw reload
 
 # 7. 安装并启动 Komari Agent 探针
-curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "${KOMARI_TOKEN}"
+if [ -n "${KOMARI_AUTO_DISCOVERY}" ]; then
+    curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --auto-discovery "${KOMARI_AUTO_DISCOVERY}"
+else
+    curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "${KOMARI_TOKEN}"
+fi
 
 echo ">>> 首次开机配置全部完成！"
 EOF
