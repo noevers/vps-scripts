@@ -217,6 +217,7 @@ ufw default allow outgoing
 ufw allow ${SSH_PORT}/tcp comment 'Custom SSH'
 ufw allow 80/tcp comment 'HTTP'
 ufw allow 443/tcp comment 'HTTPS'
+ufw allow 8065/tcp comment 'Mattermost/Web 8065'
 
 # 拦截高危出站
 ufw reject out 25/tcp comment 'Block SMTP Out' || true
@@ -240,7 +241,7 @@ cat << 'RULES' >> /etc/ufw/after.rules
 -A DOCKER-USER -p udp -m multiport --dports 135,137,138,445 -j DROP
 -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 -A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
--A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
+-A DOCKER-USER -p tcp -m multiport --dports 80,443,8065 -j ACCEPT
 -A DOCKER-USER -i docker0 -j ACCEPT
 -A DOCKER-USER -j DROP
 COMMIT
