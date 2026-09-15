@@ -217,7 +217,6 @@ ufw default allow outgoing
 ufw allow ${SSH_PORT}/tcp comment 'Custom SSH'
 ufw allow 80/tcp comment 'HTTP'
 ufw allow 443/tcp comment 'HTTPS'
-ufw allow 8065/tcp comment 'Mattermost/Web 8065'
 
 # 拦截高危出站
 ufw reject out 25/tcp comment 'Block SMTP Out' || true
@@ -241,7 +240,7 @@ cat << 'RULES' >> /etc/ufw/after.rules
 -A DOCKER-USER -p udp -m multiport --dports 135,137,138,445 -j DROP
 -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 -A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
--A DOCKER-USER -p tcp -m multiport --dports 80,443,8065 -j ACCEPT
+-A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
 -A DOCKER-USER -i docker0 -j ACCEPT
 -A DOCKER-USER -j DROP
 COMMIT
@@ -260,7 +259,105 @@ systemctl enable docker
 systemctl start docker
 ufw reload
 
-# 7. 安装并启动 Komari Agent 探针
+
+# 7. 生成方便一键管理 Docker 端口开放的系统命令: docker-port
+cat << 'TOOL_EOF' > /usr/local/bin/docker-port
+#!/bin/bash
+# ==============================================================================
+# docker-port: 安全管理 Docker 端口开放工具 (防漏、防穿透、内外端口无缝兼容)
+# ==============================================================================
+set -e
+
+ACTION="$1"
+PORT="$2"
+PROTO="${3:-tcp}"
+
+usage() {
+    echo "========================================================"
+    echo "  docker-port: Docker 端口安全开放/关闭管理工具"
+    echo "========================================================"
+    echo "使用方法:"
+    echo "  docker-port open <端口> [tcp|udp]    - 开放指定 Docker 端口 (如: docker-port open 8065)"
+    echo "  docker-port close <端口> [tcp|udp]   - 关闭指定 Docker 端口 (如: docker-port close 8065)"
+    echo "  docker-port list                     - 查看当前已开放的 Docker 端口"
+    echo ""
+    echo "示例:"
+    echo "  docker-port open 8065       # 无论是 -p 8065:8065 还是 -p 8065:8045 均可直接穿透访问"
+    echo "  docker-port close 8065      # 关闭并重新严密阻断"
+    echo "========================================================"
+    exit 1
+}
+
+RULES_FILE="/etc/ufw/after.rules"
+
+if [ -z "$ACTION" ]; then
+    usage
+fi
+
+case "$ACTION" in
+    open|allow|add)
+        if [ -z "$PORT" ]; then
+            echo "❌ 错误: 请指定要开放的端口号！"
+            usage
+        fi
+        if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+            echo "❌ 错误: 端口号必须是 1-65535 之间的数字！"
+            exit 1
+        fi
+        
+        echo ">>> 正在开放 Docker 端口: $PORT/$PROTO ..."
+        # 放行 UFW 宿主机
+        ufw allow ${PORT}/${PROTO} comment "Docker App ${PORT}" >/dev/null 2>&1 || true
+        
+        # 放行 Docker-User
+        if grep -q "ctorigdstport $PORT " "$RULES_FILE" 2>/dev/null; then
+            echo "ℹ️ 提示: 端口 $PORT 已经在 Docker 白名单中！"
+        else
+            sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p $PROTO -m conntrack --ctorigdstport $PORT -j ACCEPT" "$RULES_FILE"
+            sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p $PROTO --dport $PORT -j ACCEPT" "$RULES_FILE"
+        fi
+        
+        ufw reload >/dev/null 2>&1
+        echo "✅ 端口 $PORT/$PROTO 已经成功放行！(支持任意宿主机与容器内部端口映射)"
+        ;;
+        
+    close|deny|del|remove)
+        if [ -z "$PORT" ]; then
+            echo "❌ 错误: 请指定要关闭的端口号！"
+            usage
+        fi
+        echo ">>> 正在关闭 Docker 端口: $PORT/$PROTO ..."
+        ufw delete allow ${PORT}/${PROTO} >/dev/null 2>&1 || true
+        sed -i "/--ctorigdstport $PORT /d" "$RULES_FILE"
+        sed -i "/--dport $PORT /d" "$RULES_FILE"
+        ufw reload >/dev/null 2>&1
+        echo "✅ 端口 $PORT/$PROTO 已关闭，未授权访问已阻断！"
+        ;;
+        
+    list|status|show)
+        echo "================ 当前 Docker 端口放行状态 ================"
+        echo "默认系统级放行: 80, 443 (Web / HTTPS)"
+        echo "--------------------------------------------------------"
+        echo "自定义开放端口:"
+        PORTS=$(grep -oP "(?<=--ctorigdstport )[0-9]+" "$RULES_FILE" 2>/dev/null | sort -u || true)
+        if [ -z "$PORTS" ]; then
+            echo "  (暂无自定义开放端口，所有其他未知端口严密阻断中)"
+        else
+            for p in $PORTS; do
+                echo "  🔓 端口 $p [已放行，支持任意内外映射]"
+            done
+        fi
+        echo "========================================================"
+        ;;
+        
+    *)
+        usage
+        ;;
+esac
+TOOL_EOF
+chmod +x /usr/local/bin/docker-port
+
+# 8. 安装并启动 Komari Agent 探针
 if [ -n "${KOMARI_AUTO_DISCOVERY}" ]; then
     curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --auto-discovery "${KOMARI_AUTO_DISCOVERY}"
 else

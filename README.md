@@ -82,6 +82,28 @@ curl -sL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/noevers
 | **出站** | `135, 137, 138, 139, 445` | 🚫 强制拦截 (DROP/REJECT) | 阻断 Windows SMB/NetBIOS 勒索蠕虫向外广播传播 |
 | **出站** | `3333, 4444, 5555, 7777, 9000, 14444` | 🚫 强制拦截 (DROP/REJECT) | 阻断被黑后连接主流门罗币等 Stratum 矿池 |
 
+
+---
+
+#### 🐳 Docker 端口一键安全管理命令 (`docker-port`)
+
+由于系统重装后开启了**深度安全防护**（防止 Docker 容器绕过防火墙私自暴露未授权端口到公网），重装系统已内置专属的 `docker-port` 命令，方便你随时一键安全开放或关闭任意容器端口：
+
+```bash
+# 开放指定的 Docker 端口 (支持任意内外端口映射，例如 8065)
+docker-port open 8065
+
+# 关闭指定的 Docker 端口并恢复严密防护
+docker-port close 8065
+
+# 查看当前已开放的所有自定义 Docker 端口
+docker-port list
+```
+
+> 💡 **核心优势**：
+> - 底层使用 `conntrack --ctorigdstport` 原始目的端口追踪技术，无论是 `-p 8065:8065` 还是 `-p 8065:8045` 都能**一键穿透直通**。
+> - 未通过 `docker-port open` 显式放行的其他 Docker 端口（如 Redis 6379 / MySQL 3306）依然被严密阻断，绝无被公网爆破风险。
+
 </details>
 
 ---
