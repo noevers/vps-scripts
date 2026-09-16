@@ -416,15 +416,18 @@ case "$ACTION" in
 esac
 TOOL_EOF
 chmod +x /usr/local/bin/docker-port
+# 8. 执行网络吞吐与代理节点内核专项优化 (BBR + FQ + 100万句柄 + 64MB缓冲区)
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/tune.sh" | bash || true
 
-# 8. 安装并启动 Komari Agent 探针
+
+# 9. 安装并启动 Komari Agent 探针
 if [ -n "${KOMARI_AUTO_DISCOVERY}" ]; then
     curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --auto-discovery "${KOMARI_AUTO_DISCOVERY}"
 else
     curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "${KOMARI_TOKEN}"
 fi
 
-# 9. [可选] 启动流量挂机节点服务
+# 10. [可选] 启动流量挂机节点服务
 ${NODES_INIT_SNIPPET}
 
 
