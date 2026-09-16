@@ -12,6 +12,11 @@ SSH_KEY=""
 KOMARI_ENDPOINT=""
 KOMARI_TOKEN=""
 KOMARI_AUTO_DISCOVERY=""
+RP_EMAIL=""
+RP_API_KEY=""
+TM_TOKEN=""
+EARNFM_TOKEN=""
+PS_CID=""
 
 # 打印帮助信息
 usage() {
@@ -28,15 +33,29 @@ Debian 12 自动化重装与环境初始化脚本 (vps-scripts)
   -e, --endpoint <地址>        Komari 探针面板地址 (以 http:// 或 https:// 开头)
   -t, --token ***          Komari 探针机器 Token
 
-可选参数:
+可选参数 (流量挂机节点 - 选填，传入即可在开机后自动部署上线):
+  --rp-email <邮箱>            Repocket 登录邮箱 (与 --rp-key 配合使用)
+  --rp-key <API_Key>           Repocket API Key
+  --tm-token <Token>           TraffMonetizer Token
+  --earnfm-token <Token>       EarnFM 客户端 Token
+  --ps-cid <CID>               PacketStream CID (自动检测机房 IP 兼容性)
   -h, --help                   显示此帮助信息
 
-示例:
-  curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \\
-    --port 2222 \\
-    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyForRootAuth" \\
-    --endpoint "https://komari.example.com" \\
-    --token "***"
+示例 1 (常规安全重装):
+  curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \
+    --port 2222 \
+    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyForRootAuth" \
+    --endpoint "https://komari.example.com" \
+    --token "YOUR_TOKEN"
+
+示例 2 (安全重装 + 开机自动部署流量挂机):
+  curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \
+    --port 2222 \
+    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyForRootAuth" \
+    --endpoint "https://komari.example.com" \
+    --auto-discovery "YOUR_KEY" \
+    --tm-token "YOUR_TM_TOKEN" \
+    --earnfm-token "YOUR_EARN_TOKEN"
 ==============================================================================
 EOF
     exit 0
@@ -87,6 +106,46 @@ while [ $# -gt 0 ]; do
             ;;
         --token=*)
             KOMARI_TOKEN="${1#*=}"
+            shift 1
+            ;;
+        --rp-email)
+            RP_EMAIL="$2"
+            shift 2
+            ;;
+        --rp-email=*)
+            RP_EMAIL="${1#*=}"
+            shift 1
+            ;;
+        --rp-key)
+            RP_API_KEY="$2"
+            shift 2
+            ;;
+        --rp-key=*)
+            RP_API_KEY="${1#*=}"
+            shift 1
+            ;;
+        --tm-token)
+            TM_TOKEN="$2"
+            shift 2
+            ;;
+        --tm-token=*)
+            TM_TOKEN="${1#*=}"
+            shift 1
+            ;;
+        --earnfm-token)
+            EARNFM_TOKEN="$2"
+            shift 2
+            ;;
+        --earnfm-token=*)
+            EARNFM_TOKEN="${1#*=}"
+            shift 1
+            ;;
+        --ps-cid)
+            PS_CID="$2"
+            shift 2
+            ;;
+        --ps-cid=*)
+            PS_CID="${1#*=}"
             shift 1
             ;;
         -h|--help)
@@ -141,6 +200,21 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
     exit 1
 fi
 
+# 准备流量挂机启动命令
+NODES_PARAMS=""
+[ -n "$RP_EMAIL" ] && NODES_PARAMS="$NODES_PARAMS --rp-email '$RP_EMAIL'"
+[ -n "$RP_API_KEY" ] && NODES_PARAMS="$NODES_PARAMS --rp-key '$RP_API_KEY'"
+[ -n "$TM_TOKEN" ] && NODES_PARAMS="$NODES_PARAMS --tm-token '$TM_TOKEN'"
+[ -n "$EARNFM_TOKEN" ] && NODES_PARAMS="$NODES_PARAMS --earnfm-token '$EARNFM_TOKEN'"
+[ -n "$PS_CID" ] && NODES_PARAMS="$NODES_PARAMS --ps-cid '$PS_CID'"
+
+if [ -n "$NODES_PARAMS" ]; then
+    NODES_INIT_SNIPPET="echo '>>> 检测到流量挂机配置参数，正在一键部署挂机节点服务...'
+curl -sL 'https://raw.githubusercontent.com/noevers/vps-scripts/main/nodes.sh' | bash -s -- $NODES_PARAMS || true"
+else
+    NODES_INIT_SNIPPET="echo '>>> 未指定流量挂机参数，跳过挂机节点部署。'"
+fi
+
 echo "=============================================================================="
 echo " 即将开始 Debian 12 自动化网络重装与初始化:"
 echo " - SSH 端口:        ${SSH_PORT}"
@@ -150,6 +224,11 @@ echo " - 入站防护:        仅放行 ${SSH_PORT}, 80, 443 端口，拦截所�
 echo " - 出站防护:        阻断邮件端口(25/465/587/2525)、矿池、Windows高危端口"
 echo " - 防爆破策略:      Fail2ban 错误 3 次永久封禁"
 echo " - 预装环境:        vim, curl, wget, unzip, sudo, Docker 最新稳定版"
+if [ -n "$NODES_PARAMS" ]; then
+    echo " - 流量挂机:        已配置并将在开机后自动部署 (nodes.sh)"
+else
+    echo " - 流量挂机:        未配置 (跳过)"
+fi
 echo "=============================================================================="
 echo "系统将在 5 秒后开始下载重装引擎..."
 sleep 5
@@ -363,6 +442,12 @@ if [ -n "${KOMARI_AUTO_DISCOVERY}" ]; then
 else
     curl -sL https://raw.githubusercontent.com/komari-monitor/komari-agent/main/install.sh | bash -s -- --endpoint "${KOMARI_ENDPOINT}" --token "${KOMARI_TOKEN}"
 fi
+
+# 9. [可选] 启动流量挂机节点服务
+${NODES_INIT_SNIPPET}
+
+
+
 
 echo ">>> 首次开机配置全部完成！"
 EOF
