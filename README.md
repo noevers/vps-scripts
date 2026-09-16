@@ -9,6 +9,8 @@
 | 脚本名称 | 功能概述 | 适用系统 | 详细介绍 |
 | :--- | :--- | :--- | :--- |
 | **`debian.sh`** | Debian 12 自动化网络重装 + 安全加固 + Docker + Komari 探针 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debiansh---debian-12-自动化网络重装与安全加固) |
+| **`nodes.sh`** | 流量共享挂机容器一键管理 (Repocket / TM / EarnFM / PacketStream) | Linux (含 Docker 环境) | [👉 点击查看详情](#-nodessh---流量挂机容器一键管理) |
+| **`info.sh`** | 硬件全貌 / 内存频率 / 硬盘 SMART 健康度与读写统计 / YABS 测速 | Linux (通用) | 综合性能及网络测速工具 |
 
 ---
 
@@ -103,6 +105,56 @@ docker-port list
 > 💡 **核心优势**：
 > - 底层使用 `conntrack --ctorigdstport` 原始目的端口追踪技术，无论是 `-p 8065:8065` 还是 `-p 8065:8045` 都能**一键穿透直通**。
 > - 未通过 `docker-port open` 显式放行的其他 Docker 端口（如 Redis 6379 / MySQL 3306）依然被严密阻断，绝无被公网爆破风险。
+
+</details>
+
+---
+
+
+---
+
+### 🌐 `nodes.sh` - 流量挂机容器一键管理
+
+<details open>
+<summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
+
+<br>
+
+一键部署和管理多平台流量共享挂机容器（Repocket、TraffMonetizer、EarnFM、PacketStream），内置 IP 智能兼容检测与 Watchtower 自动化更新。
+
+#### 🌟 核心特性
+- **纯净参数化调用**：所有服务 Token / API Key **默认为空**，仅在命令行传入对应参数时才启动对应服务，未传参的节点自动跳过。
+- **环境自愈检测**：自动检测环境，若未安装 Docker 则全自动拉取安装并启动。
+- **干净幂等启动**：每次启动自动检测并清理同名旧容器，避免端口与名称冲突。
+- **PacketStream 智能 IP 兼容探测**：启动 `psclient` 后自动等待并检测当前网络 IP 是否被支持。若被机房/数据中心拦截，自动清退卸载 `psclient`，保留其余可用节点。
+- **Watchtower 动态关联更新**：仅对本次成功启动运行的挂机容器配置 Watchtower 自动凌晨 03:00 更新，不干扰其他无关容器。
+
+---
+
+#### 💻 一键运行命令
+
+##### 1. 启动所有支持的挂机节点
+```bash
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/nodes.sh" | bash -s --   --rp-email "your_email@example.com"   --rp-key "your_repocket_api_key"   --tm-token "your_traffmonetizer_token"   --earnfm-token "your_earnfm_token"   --ps-cid "your_packetstream_cid"
+```
+
+##### 2. 仅启动部分节点 (例如仅 TraffMonetizer 与 EarnFM)
+```bash
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/nodes.sh" | bash -s --   --tm-token "your_traffmonetizer_token"   --earnfm-token "your_earnfm_token"
+```
+
+---
+
+#### 📋 命令行参数详解
+
+| 参数项 | 缩写 | 是否必填 | 参数说明 |
+| :--- | :--- | :--- | :--- |
+| `--rp-email` | `-m` | 可选 | Repocket 注册账号邮箱 |
+| `--rp-key` | `-k` | 可选 | Repocket 用户的 API Key (需与邮箱同时提供) |
+| `--tm-token` | `-t` | 可选 | TraffMonetizer 应用 Token |
+| `--earnfm-token` | `-e` | 可选 | EarnFM 节点 API Token |
+| `--ps-cid` | `-c` | 可选 | PacketStream 用户的 CID (自动检测机房 IP 兼容性) |
+| `--help` | `-h` | 可选 | 查看脚本帮助信息与调用示例 |
 
 </details>
 
