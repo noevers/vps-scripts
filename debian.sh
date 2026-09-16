@@ -12,11 +12,6 @@ SSH_KEY=""
 KOMARI_ENDPOINT=""
 KOMARI_TOKEN=""
 KOMARI_AUTO_DISCOVERY=""
-RP_EMAIL=""
-RP_API_KEY=""
-TM_TOKEN=""
-EARNFM_TOKEN=""
-PS_CID=""
 
 # 打印帮助信息
 usage() {
@@ -33,29 +28,15 @@ Debian 12 自动化重装与环境初始化脚本 (vps-scripts)
   -e, --endpoint <地址>        Komari 探针面板地址 (以 http:// 或 https:// 开头)
   -t, --token ***          Komari 探针机器 Token
 
-可选参数 (流量挂机节点 - 选填，传入即可在开机后自动部署上线):
-  --rp-email <邮箱>            Repocket 登录邮箱 (与 --rp-key 配合使用)
-  --rp-key <API_Key>           Repocket API Key
-  --tm-token <Token>           TraffMonetizer Token
-  --earnfm-token <Token>       EarnFM 客户端 Token
-  --ps-cid <CID>               PacketStream CID (自动检测机房 IP 兼容性)
+其他选项:
   -h, --help                   显示此帮助信息
 
-示例 1 (常规安全重装):
+使用示例:
   curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \
     --port 2222 \
     --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyForRootAuth" \
     --endpoint "https://komari.example.com" \
     --token "YOUR_TOKEN"
-
-示例 2 (安全重装 + 开机自动部署流量挂机):
-  curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh | bash -s -- \
-    --port 2222 \
-    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExamplePublicKeyForRootAuth" \
-    --endpoint "https://komari.example.com" \
-    --auto-discovery "YOUR_KEY" \
-    --tm-token "YOUR_TM_TOKEN" \
-    --earnfm-token "YOUR_EARN_TOKEN"
 ==============================================================================
 EOF
     exit 0
