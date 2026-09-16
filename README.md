@@ -11,6 +11,7 @@
 | **`debian.sh`** | **纯净版**：Debian 12 自动化网络重装 + 安全加固 + Komari 探针 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debiansh---debian-12-自动化网络重装纯净版) |
 | **`debian-nodes.sh`** | **挂机版**：Debian 12 重装 + 安全加固 + 自动部署多平台流量挂机 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debian-nodessh---debian-12-网络重装--流量挂机集成版) |
 | **`nodes.sh`** | **独立挂机**：TraffMonetizer / EarnFM / Repocket / PacketStream 节点管理 | Debian / Ubuntu (已装 Docker) | [👉 点击查看详情](#-nodessh---多平台流量共享挂机管理脚本) |
+| **`tune.sh`** | **节点优化**：BBR+FQ / 百万文件句柄 / TCP与UDP(QUIC)缓冲区吞吐调优 | Linux (推荐 Debian 12 / Ubuntu) | [👉 点击查看详情](#-tunesh---debian-12-代理节点与高并发网络优化) |
 | **`info.sh`** | 硬件配置、内存频率、硬盘 SMART 健康度/读写量、YABS 双栈测速 | Linux (支持常见发行版与救援模式) | [👉 点击查看详情](#-infosh---系统硬件配置与网络全景检测) |
 
 ---
@@ -145,3 +146,29 @@ curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh?noc
 ```
 
 </details>\n
+
+---
+
+### 📦 `tune.sh` - Debian 12 代理节点与高并发网络优化
+
+<details>
+<summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
+
+<br>
+
+专门针对 **科学上网代理节点 (Xray / Sing-box / V2Ray / Shadowsocks)** 以及 **基于 UDP 的新型协议 (Hysteria 2 / TUIC / QUIC / WireGuard)** 深度定制的系统与网络吞吐优化脚本。
+
+#### 🚀 核心优化项目：
+1. **拥塞控制**：自动启用 **BBR + FQ**（Fair Queueing），大幅降低越洋长途链路的丢包抖动，跑满跨境网络带宽；
+2. **高并发连接与句柄**：将系统级、用户级与 systemd 最大文件描述符限制直接扩容至 **1,000,000**，彻底杜绝 `too many open files` 错误；
+3. **TCP 缓冲区深度优化**：将核心收发缓冲区最大限制提升至 **64MB**，优化 `tcp_rmem` 与 `tcp_wmem`，提升大延迟高带宽（BDP）链路下的单线程吞吐能力；
+4. **UDP / QUIC 吞吐防丢包**：专门调整 `udp_rmem_min` 与 `udp_wmem_min`，解决 Hysteria 2 / TUIC 在大流量爆发传输时被系统内核静默限速或丢包的痛点；
+5. **长连接保活与回收**：开启 `tcp_tw_reuse`，加速释放 TIME_WAIT 套接字；缩短 `tcp_fin_timeout` 至 15s；优化 TCP Keepalive 防止代理连接被运营商 NAT 静默拆除；
+6. **降低 Swappiness**：设置 `vm.swappiness = 10`，优先使用物理内存，避免频繁读写 Swap 引起卡顿。
+
+#### 💻 一键运行命令：
+```bash
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/tune.sh" | bash
+```
+
+</details>
