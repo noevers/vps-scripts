@@ -69,6 +69,11 @@ curl -sL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/noevers
 | `--endpoint` | `-e` | **必填** | Komari 探针面板地址（以 `http://` 或 `https://` 开头） |
 | `--auto-discovery` | `-a` | **二选一** | **Komari 自动发现密钥（推荐）**：在 Komari 面板「设置」中开启自动发现后获取的全局 Key，**安装时面板会自动新建并上架此机器** |
 | `--token` | `-t` | **二选一** | **Komari 单机 Token**：在 Komari 面板手动点击「添加节点」后分配给该特定机器的专属 Token |
+| `--rp-email` | `-m` | 可选 | Repocket 注册账号邮箱 (需配合 `--rp-key`) |
+| `--rp-key` | `-k` | 可选 | Repocket API Key |
+| `--tm-token` | `-t` | 可选 | TraffMonetizer Token |
+| `--earnfm-token` | `-e` | 可选 | EarnFM 节点 API Token |
+| `--ps-cid` | `-c` | 可选 | PacketStream CID (自动检测机房 IP 兼容性) |
 | `--help` | `-h` | 可选 | 查看脚本帮助文档与完整参数格式 |
 
 ---
