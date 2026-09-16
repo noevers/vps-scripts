@@ -290,18 +290,24 @@ ufw reject out 139/tcp comment 'Block NetBIOS Out' || true
 ufw reject out 445/tcp comment 'Block SMB Out' || true
 ufw reject out 3333,4444,5555,7777,9000,14444/tcp comment 'Block Stratum Mining Out' || true
 
-# Docker 安全规则
-cat << 'RULES' >> /etc/ufw/after.rules
+# Docker 安全规则 (动态识别外网主网卡，容器出站全放行解除误杀，入站严格白名单与主动高危拦截)
+WAN_IF=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1)
+[ -z "$WAN_IF" ] && WAN_IF=$(ip link | awk -F: '$0 !~ "lo|docker|br-|veth" && $2 ~ "^ [a-z]" {print $2; exit}' | tr -d ' ')
+[ -z "$WAN_IF" ] && WAN_IF="eth0"
 
-# --- DOCKER 安全规则 (防滥发邮件 + 防端口越界暴露) ---
+cat << RULES >> /etc/ufw/after.rules
+
+# --- DOCKER 安全规则 (仅拦截主动高危出站 + 容器出站全放行 + 入站白名单保护) ---
 *filter
 :DOCKER-USER - [0:0]
 -A DOCKER-USER -p tcp -m multiport --dports 25,465,587,2525,135,139,445,3333,4444,5555,7777,9000,14444 -j DROP
 -A DOCKER-USER -p udp -m multiport --dports 135,137,138,445 -j DROP
 -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 -A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
--A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
 -A DOCKER-USER -i docker0 -j ACCEPT
+-A DOCKER-USER -i br-+ -j ACCEPT
+-A DOCKER-USER -o ${WAN_IF} -j ACCEPT
+-A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
 -A DOCKER-USER -j DROP
 COMMIT
 RULES
