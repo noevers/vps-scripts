@@ -8,165 +8,140 @@
 
 | 脚本名称 | 功能概述 | 适用系统 | 详细介绍 |
 | :--- | :--- | :--- | :--- |
-| **`debian.sh`** | Debian 12 自动化网络重装 + 安全加固 + Docker + Komari 探针 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debiansh---debian-12-自动化网络重装与安全加固) |
-| **`nodes.sh`** | 流量共享挂机容器一键管理 (Repocket / TM / EarnFM / PacketStream) | Linux (含 Docker 环境) | [👉 点击查看详情](#-nodessh---流量挂机容器一键管理) |
-| **`info.sh`** | 硬件全貌 / 内存频率 / 硬盘 SMART 健康度与读写统计 / YABS 测速 | Linux (通用) | 综合性能及网络测速工具 |
+| **`debian.sh`** | **纯净版**：Debian 12 自动化网络重装 + 安全加固 + Komari 探针 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debiansh---debian-12-自动化网络重装纯净版) |
+| **`debian-nodes.sh`** | **挂机版**：Debian 12 重装 + 安全加固 + 自动部署多平台流量挂机 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debian-nodessh---debian-12-网络重装--流量挂机集成版) |
+| **`nodes.sh`** | **独立挂机**：TraffMonetizer / EarnFM / Repocket / PacketStream 节点管理 | Debian / Ubuntu (已装 Docker) | [👉 点击查看详情](#-nodessh---多平台流量共享挂机管理脚本) |
+| **`info.sh`** | 硬件配置、内存频率、硬盘 SMART 健康度/读写量、YABS 双栈测速 | Linux (支持常见发行版与救援模式) | [👉 点击查看详情](#-infosh---系统硬件配置与网络全景检测) |
 
 ---
 
 ## 🚀 脚本详情与使用指南
 
-### 📦 `debian.sh` - Debian 12 自动化网络重装与安全加固
+### 📦 `debian.sh` - Debian 12 自动化网络重装（纯净版）
 
 <details open>
 <summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
 
 <br>
 
-一键将当前服务器网络重装为纯净的 **Debian 12 (Bookworm)**，开机自动完成安全加固、防火墙策略、Docker 环境与 Komari 探针上线。
+一键将当前服务器网络重装为最纯净的 **Debian 12 (Bookworm)**，开机自动完成：
+- **SSH 安全加固**：强制修改自定义 SSH 端口，**只允许密钥认证**，禁止密码登录；
+- **Fail2ban 永久防御**：适配 systemd 后端，密码/密钥错误 3 次永久拉黑（`bantime = -1`）；
+- **UFW 防火墙与防封号规则**：
+  - 入站默认全关，仅放行自定义 SSH 端口、`80/tcp` 与 `443/tcp`；
+  - 强制阻断垃圾邮件外发（`25, 465, 587, 2525`）、勒索病毒与高危矿池端口；
+  - 开机自动屏蔽 Vodafone 滥用域名；
+- **Docker 环境与一键端口管理**：预装 Docker，并提供 `docker-port open/close/list` 命令，按需一键放通容器端口；
+- **Komari 探针自动上线**：系统就绪后自动启动并接入探针面板。
 
-#### 🌟 核心特性
-- **全自动无人值守**：自托管重装引擎，重启后自动完成分区扩容、系统安装与静默初始化。
-- **SSH 深度加固**：自定义 SSH 端口，**仅允许密钥认证**，彻底禁用密码登录。
-- **探针免操作上线**：完美支持 Komari 探针 **自动发现（Auto Discovery）** 与 **单机 Token** 双模式，探针点亮即代表机器完全就绪。
-- **防火墙严格白名单 (UFW)**：
-  - **入站**：默认拦截所有端口，仅放行自定义 SSH 端口、`80 (HTTP)`、`443 (HTTPS)`。
-  - **Docker 隔离**：原生 `DOCKER-USER` 链防护，严防 Docker 端口映射绕过 UFW 暴露。
-  - **防封号出站拦截**：全系统（宿主机 + 容器）阻断垃圾邮件发信（`25/465/587/2525`）、挖矿矿池端口（`3333/4444/5555/7777/9000/14444`）与 SMB/勒索蠕虫端口（`135/139/445`）。
-- **暴力破解永久封禁 (Fail2ban)**：失败 3 次直接通过 UFW 永久拉黑 IP（`bantime = -1`），对接 `systemd-journald` 日志源。
-- **预装基础全家桶**：`vim`, `curl`, `wget`, `unzip`, `sudo`, `git`, `htop`, `net-tools`，以及官方最新稳定版 **Docker & Docker Compose**。
+#### 💻 纯净版一键运行命令：
 
----
-
-#### 💻 一键运行命令
-
-##### 方式 A：使用「自动发现 Key」（推荐，无需在面板提前添加机器）
 ```bash
-curl -sL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh?t=$(date +%s%N)" | bash -s -- \
-  --port <SSH端口> \
-  --key "<SSH公钥内容>" \
-  --endpoint "<Komari面板地址>" \
-  --auto-discovery "<自动发现Key>"
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh" | bash -s -- \
+  --port 20026 \
+  --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOjkaEFKxmHz194omW679VPz6jvATK9F5ycv0/+qK34X servers" \
+  --endpoint "https://km.666889.xyz" \
+  --auto-discovery "RDMOJXrUL4kQNsgnu7KPlNSq"
 ```
 
-##### 方式 B：使用「单机固定 Token」（在面板手动添加机器后获得的 Token）
-```bash
-curl -sL -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/noevers/vps-scripts/main/debian.sh?t=$(date +%s%N)" | bash -s -- \
-  --port <SSH端口> \
-  --key "<SSH公钥内容>" \
-  --endpoint "<Komari面板地址>" \
-  --token "***"
-```
-
----
-
-#### 📋 命令行参数详解
-
-| 参数项 | 缩写 | 是否必填 | 参数说明与取值规范 |
+#### 📋 参数说明：
+| 参数名 | 简写 | 是否必填 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `--port` | `-p` | **必填** | 自定义 SSH 端口（如 `20026`，必须为 1-65535 纯数字） |
-| `--key` | `-k` | **必填** | SSH 公钥（以 `ssh-ed25519` 或 `ssh-rsa` 开头，支持带注释） |
-| `--endpoint` | `-e` | **必填** | Komari 探针面板地址（以 `http://` 或 `https://` 开头） |
-| `--auto-discovery` | `-a` | **二选一** | **Komari 自动发现密钥（推荐）**：在 Komari 面板「设置」中开启自动发现后获取的全局 Key，**安装时面板会自动新建并上架此机器** |
-| `--token` | `-t` | **二选一** | **Komari 单机 Token**：在 Komari 面板手动点击「添加节点」后分配给该特定机器的专属 Token |
-| `--rp-email` | `-m` | 可选 | Repocket 注册账号邮箱 (需配合 `--rp-key`) |
-| `--rp-key` | `-k` | 可选 | Repocket API Key |
-| `--tm-token` | `-t` | 可选 | TraffMonetizer Token |
-| `--earnfm-token` | `-e` | 可选 | EarnFM 节点 API Token |
-| `--ps-cid` | `-c` | 可选 | PacketStream CID (自动检测机房 IP 兼容性) |
-| `--help` | `-h` | 可选 | 查看脚本帮助文档与完整参数格式 |
-
----
-
-#### 🛡️ 防火墙进出站安全防护矩阵
-
-| 方向 | 端口 / 协议 | 策略 | 作用与防护说明 |
-| :--- | :--- | :--- | :--- |
-| **入站** | `自定义 SSH` | ✅ 允许 (ALLOW) | 仅允许密钥登录的管理端口 |
-| **入站** | `80 / 443 (TCP)` | ✅ 允许 (ALLOW) | 网站 Web / 证书申请 / 反代流量 |
-| **入站** | `其他所有端口` | ❌ 默认拒绝 (DENY) | 宿主机与 Docker 映射端口均受 UFW 白名单严格保护 |
-| **出站** | `25, 465, 587, 2525 (TCP)` | 🚫 强制拦截 (DROP/REJECT) | 阻断容器/木马对外发垃圾邮件，防 VPS 商家滥用封机 |
-| **出站** | `135, 137, 138, 139, 445` | 🚫 强制拦截 (DROP/REJECT) | 阻断 Windows SMB/NetBIOS 勒索蠕虫向外广播传播 |
-| **出站** | `3333, 4444, 5555, 7777, 9000, 14444` | 🚫 强制拦截 (DROP/REJECT) | 阻断被黑后连接主流门罗币等 Stratum 矿池 |
-
-
----
-
-#### 🐳 Docker 端口一键安全管理命令 (`docker-port`)
-
-由于系统重装后开启了**深度安全防护**（防止 Docker 容器绕过防火墙私自暴露未授权端口到公网），重装系统已内置专属的 `docker-port` 命令，方便你随时一键安全开放或关闭任意容器端口：
-
-```bash
-# 开放指定的 Docker 端口 (支持任意内外端口映射，例如 8065)
-docker-port open 8065
-
-# 关闭指定的 Docker 端口并恢复严密防护
-docker-port close 8065
-
-# 查看当前已开放的所有自定义 Docker 端口
-docker-port list
-```
-
-> 💡 **核心优势**：
-> - 底层使用 `conntrack --ctorigdstport` 原始目的端口追踪技术，无论是 `-p 8065:8065` 还是 `-p 8065:8045` 都能**一键穿透直通**。
-> - 未通过 `docker-port open` 显式放行的其他 Docker 端口（如 Redis 6379 / MySQL 3306）依然被严密阻断，绝无被公网爆破风险。
+| `--port` | `-p` | **必填** | 自定义 SSH 端口 (范围: 1-65535) |
+| `--key` | `-k` | **必填** | root 用户的 SSH 公钥内容 |
+| `--endpoint` | `-e` | **必填** | Komari 探针面板地址 (如 `https://km.666889.xyz`) |
+| `--auto-discovery` | `-a` | **二选一** | **Komari 自动发现 Key** (推荐) |
+| `--token` | `-t` | **二选一** | **Komari 单机 Token** |
 
 </details>
 
 ---
 
+### 📦 `debian-nodes.sh` - Debian 12 网络重装 + 流量挂机集成版
 
----
-
-### 🌐 `nodes.sh` - 流量挂机容器一键管理
-
-<details open>
+<details>
 <summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
 
 <br>
 
-一键部署和管理多平台流量共享挂机容器（Repocket、TraffMonetizer、EarnFM、PacketStream），内置 IP 智能兼容检测与 Watchtower 自动化更新。
+在 `debian.sh` 纯净版完整功能（重装 + 加固 + 探针）的基础上，**额外集成多平台流量共享挂机容器**。开机完成基础加固与探针上线后，自动拉取并启动指定平台的挂机节点！
 
-#### 🌟 核心特性
-- **纯净参数化调用**：所有服务 Token / API Key **默认为空**，仅在命令行传入对应参数时才启动对应服务，未传参的节点自动跳过。
-- **环境自愈检测**：自动检测环境，若未安装 Docker 则全自动拉取安装并启动。
-- **干净幂等启动**：每次启动自动检测并清理同名旧容器，避免端口与名称冲突。
-- **PacketStream 智能 IP 兼容探测**：启动 `psclient` 后自动等待并检测当前网络 IP 是否被支持。若被机房/数据中心拦截，自动清退卸载 `psclient`，保留其余可用节点。
-- **Watchtower 动态关联更新**：仅对本次成功启动运行的挂机容器配置 Watchtower 自动凌晨 03:00 更新，不干扰其他无关容器。
+#### 💻 挂机集成版一键运行命令示例：
 
----
-
-#### 💻 一键运行命令
-
-##### 1. 启动所有支持的挂机节点
 ```bash
-curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/nodes.sh" | bash -s --   --rp-email "your_email@example.com"   --rp-key "your_repocket_api_key"   --tm-token "your_traffmonetizer_token"   --earnfm-token "your_earnfm_token"   --ps-cid "your_packetstream_cid"
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/debian-nodes.sh" | bash -s -- \
+  --port 20026 \
+  --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOjkaEFKxmHz194omW679VPz6jvATK9F5ycv0/+qK34X servers" \
+  --endpoint "https://km.666889.xyz" \
+  --auto-discovery "RDMOJXrUL4kQNsgnu7KPlNSq" \
+  --rp-email "lovedsser@foxmail.com" \
+  --rp-key "your_repocket_key" \
+  --tm-token "your_traffmonetizer_token" \
+  --earnfm-token "your_earnfm_token" \
+  --ps-cid "6WQA"
 ```
 
-##### 2. 仅启动部分节点 (例如仅 TraffMonetizer 与 EarnFM)
-```bash
-curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/nodes.sh" | bash -s --   --tm-token "your_traffmonetizer_token"   --earnfm-token "your_earnfm_token"
-```
-
----
-
-#### 📋 命令行参数详解
-
-| 参数项 | 缩写 | 是否必填 | 参数说明 |
+#### 📋 额外可选挂机参数（按需传入，不传不启动）：
+| 参数名 | 缩写 | 默认值 | 作用说明 |
 | :--- | :--- | :--- | :--- |
-| `--rp-email` | `-m` | 可选 | Repocket 注册账号邮箱 |
-| `--rp-key` | `-k` | 可选 | Repocket 用户的 API Key (需与邮箱同时提供) |
-| `--tm-token` | `-t` | 可选 | TraffMonetizer 应用 Token |
-| `--earnfm-token` | `-e` | 可选 | EarnFM 节点 API Token |
-| `--ps-cid` | `-c` | 可选 | PacketStream 用户的 CID (自动检测机房 IP 兼容性) |
-| `--help` | `-h` | 可选 | 查看脚本帮助信息与调用示例 |
+| `--rp-email` | `-m` | 空 | Repocket 注册账号邮箱 |
+| `--rp-key` | `-k` | 空 | Repocket API Key（需与邮箱配合使用） |
+| `--tm-token` | `-tm` | 空 | TraffMonetizer 应用 Token |
+| `--earnfm-token` | `-ef` | 空 | EarnFM 节点 API Token |
+| `--ps-cid` | `-ps` | 空 | PacketStream 邀请 ID (CID) |
 
 </details>
 
 ---
 
-## 鸣谢与上游开源项目
+### 📦 `nodes.sh` - 多平台流量共享挂机管理脚本
 
-- **重装引擎核心**：感谢 [bin456789/reinstall](https://github.com/bin456789/reinstall) 提供的底层网络重装支持（本项目已在 `core/` 目录完成自主托管与自建源适配，无删库风险）。
-- **探针监控**：感谢 [komari-monitor/komari-agent](https://github.com/komari-monitor/komari-agent) 提供的轻量服务器监控 Agent。
-- **安全与防护规则**：参考了 [noevers/AutoScripts](https://github.com/noevers/AutoScripts) 的网络防护逻辑。
+<details>
+<summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
+
+<br>
+
+适合在**已有系统**（无需重装）上随时部署、管理或更新流量挂机容器。
+- 自动检测并安装 Docker；
+- 支持 **Repocket**、**TraffMonetizer**、**EarnFM**、**PacketStream**；
+- 自动配置 **Watchtower** 保持挂机镜像持续自动更新；
+- 智能探测 PacketStream 机房 IP 兼容性，遭遇拦截自动清理。
+
+#### 💻 独立运行命令：
+```bash
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/nodes.sh" | bash -s -- \
+  --rp-email "your_email@example.com" \
+  --rp-key "your_repocket_api_key" \
+  --tm-token "your_traffmonetizer_token" \
+  --earnfm-token "your_earnfm_token" \
+  --ps-cid "your_packetstream_cid"
+```
+
+</details>
+
+---
+
+### 📦 `info.sh` - 系统硬件配置与网络全景检测
+
+<details>
+<summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
+
+<br>
+
+一键检测服务器的硬件体质、真实读写寿命与全球双栈网络性能：
+- **硬件配置**：CPU 型号与主频、架构、AES-NI 支持、物理内存频率与类型、开机运行时间；
+- **硬盘健康与寿命**：
+  - 读取 NVMe / SATA 固态硬盘型号与通电时间；
+  - 精准解析 **终生总写入 (TBW)** 与 **终生/累计总读取 (TBR)**；
+  - 磁盘 1GB 顺序写入 I/O 速率测试；
+- **全球节点双栈网络测速**：
+  - 官方原版 YABS IPv4 与 IPv6 测速逻辑；
+  - 多端口自动探测防忙碌重试；
+  - 测速伦敦、阿姆斯特丹、法兰克福、洛杉矶等多地节点双向速率与延迟。
+
+#### 💻 一键检测命令：
+```bash
+curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh?nocache=$(date +%s%N)" | bash
+```
+
+</details>\n
