@@ -8,6 +8,7 @@
 
 | 脚本名称 | 功能概述 | 适用系统 | 详细介绍 |
 | :--- | :--- | :--- | :--- |
+| **`init.sh`** | **原生系统一键初始化加固**（改 SSH 端口/仅公钥、UFW 防封号防火墙、Docker 环境、BBR 调优、可选挂机） | Debian 11/12+, Ubuntu 20.04/22.04+ 等 | [👉 查看详情](#-initsh---原生系统一键初始化加固与-docker-部署) |
 | **`debian.sh`** | **纯净版**：Debian 12 自动化网络重装 + 安全加固 + Komari 探针 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debiansh---debian-12-自动化网络重装纯净版) |
 | **`debian-nodes.sh`** | **挂机版**：Debian 12 重装 + 安全加固 + 自动部署多平台流量挂机 | Debian / Ubuntu / CentOS 等 | [👉 点击查看详情](#-debian-nodessh---debian-12-网络重装--流量挂机集成版) |
 | **`nodes.sh`** | **独立挂机**：TraffMonetizer / EarnFM / Repocket / PacketStream 节点管理 | Debian / Ubuntu (已装 Docker) | [👉 点击查看详情](#-nodessh---多平台流量共享挂机管理脚本) |
@@ -17,6 +18,59 @@
 ---
 
 ## 🚀 脚本详情与使用指南
+
+### 🛡️ `init.sh` - 原生系统一键初始化加固与 Docker 部署
+
+<details open>
+<summary><b>🔍 点击折叠 / 展开详细参数与使用说明</b></summary>
+
+<br>
+
+适用于**已有的干净 Linux 系统（Debian / Ubuntu 等）**，无需全盘网络重装，一键完成全套生产级安全加固、Docker 环境就绪与网络优化。
+
+#### 💡 核心特性
+1. **SSH 深度加固**：一键自定义 SSH 端口，强制仅允许公钥认证（`PasswordAuthentication no`），彻底杜绝密码爆破；
+2. **生产级防御体系**：自动安装并配置 `Fail2ban`（3 次错误直接永久拉黑 `bantime = -1`）；
+3. **出站防封号策略**：强制阻断垃圾邮件发信（`25, 465, 587, 2525`）与高危矿池/蠕虫端口，保护 VPS 账号安全；
+4. **开箱即用 Docker 与防火墙联动**：自动安装 Docker，写入专属 `DOCKER-USER` 规则（放行 8443 等容器出站，杜绝外部端口裸奔）；
+5. **专属端口管理命令**：系统内置 `docker-port` 命令，支持 `docker-port open <端口>` 一键精准放行容器端口；
+6. **网络性能与代理调优**：默认自动执行 `tune.sh`，开启 BBR + FQ、扩容 100 万文件句柄与 64MB 缓冲区；
+7. **可选一键挂机**：支持传入 TraffMonetizer / Repocket / EarnFM / PacketStream 参数，按需一键拉起容器。
+
+#### 💻 常用调用命令
+
+- **场景 1：纯净初始化（加固 + UFW + Docker + BBR，不挂机）**
+  ```bash
+  curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/init.sh" | bash -s -- \
+    --port 20026 \
+    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOjkaEFKxmHz194omW679VPz6jvATK9F5ycv0/+qK34X servers"
+  ```
+
+- **场景 2：初始化加固 + 一键启动挂机容器**
+  ```bash
+  curl -sL "https://raw.githubusercontent.com/noevers/vps-scripts/main/init.sh" | bash -s -- \
+    --port 20026 \
+    --key "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOjkaEFKxmHz194omW679VPz6jvATK9F5ycv0/+qK34X servers" \
+    --tm-token "你的TraffMonetizer_Token" \
+    --earnfm-token "你的EarnFM_Token"
+  ```
+
+#### 📋 命令行参数对照表
+
+| 参数名 | 缩写 | 是否必填 | 作用说明 |
+| :--- | :--- | :--- | :--- |
+| `--port` | `-p` | **必填** | 自定义 SSH 端口 (如 `20026`) |
+| `--key` | `-k` | **必填** | SSH 登录公钥 (强制仅公钥登录，禁用密码认证) |
+| `--skip-tune` | 无 | 可选 | 跳过 BBR 与网络性能优化 |
+| `--rp-email` | `-m` | 可选 | Repocket 账号邮箱 |
+| `--rp-key` | `-rk` | 可选 | Repocket API Key |
+| `--tm-token` | `-tm` | 可选 | TraffMonetizer 节点 Token |
+| `--earnfm-token` | `-ef` | 可选 | EarnFM 节点 API Token |
+| `--ps-cid` | `-ps` | 可选 | PacketStream 邀请 ID (CID) |
+
+</details>
+
+---
 
 ### 📦 `debian.sh` - Debian 12 自动化网络重装（纯净版）
 
