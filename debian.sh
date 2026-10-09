@@ -334,9 +334,9 @@ cat << 'TOOL_EOF' > /usr/local/bin/docker-port
 # ==============================================================================
 set -e
 
-ACTION="$1"
-PORT="$2"
-PROTO="${3:-tcp}"
+ACTION="\$1"
+PORT="\$2"
+PROTO="\${3:-tcp}"
 
 usage() {
     echo "========================================================"
@@ -356,48 +356,48 @@ usage() {
 
 RULES_FILE="/etc/ufw/after.rules"
 
-if [ -z "$ACTION" ]; then
+if [ -z "\$ACTION" ]; then
     usage
 fi
 
-case "$ACTION" in
+case "\$ACTION" in
     open|allow|add)
-        if [ -z "$PORT" ]; then
+        if [ -z "\$PORT" ]; then
             echo "❌ 错误: 请指定要开放的端口号！"
             usage
         fi
-        if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+        if ! [[ "\$PORT" =~ ^[0-9]+\$ ]] || [ "\$PORT" -lt 1 ] || [ "\$PORT" -gt 65535 ]; then
             echo "❌ 错误: 端口号必须是 1-65535 之间的数字！"
             exit 1
         fi
         
-        echo ">>> 正在开放 Docker 端口: $PORT/$PROTO ..."
+        echo ">>> 正在开放 Docker 端口: \$PORT/\$PROTO ..."
         # 放行 UFW 宿主机
-        ufw allow ${PORT}/${PROTO} comment "Docker App ${PORT}" >/dev/null 2>&1 || true
+        ufw allow \${PORT}/\${PROTO} comment "Docker App \${PORT}" >/dev/null 2>&1 || true
         
         # 放行 Docker-User
-        if grep -q "ctorigdstport $PORT " "$RULES_FILE" 2>/dev/null; then
-            echo "ℹ️ 提示: 端口 $PORT 已经在 Docker 白名单中！"
+        if grep -q "ctorigdstport \$PORT " "\$RULES_FILE" 2>/dev/null; then
+            echo "ℹ️ 提示: 端口 \$PORT 已经在 Docker 白名单中！"
         else
-            sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p $PROTO -m conntrack --ctorigdstport $PORT -j ACCEPT" "$RULES_FILE"
-            sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p $PROTO --dport $PORT -j ACCEPT" "$RULES_FILE"
+            sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p \$PROTO -m conntrack --ctorigdstport \$PORT -j ACCEPT" "\$RULES_FILE"
+            sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p \$PROTO --dport \$PORT -j ACCEPT" "\$RULES_FILE"
         fi
         
         ufw reload >/dev/null 2>&1
-        echo "✅ 端口 $PORT/$PROTO 已经成功放行！(支持任意宿主机与容器内部端口映射)"
+        echo "✅ 端口 \$PORT/\$PROTO 已经成功放行！(支持任意宿主机与容器内部端口映射)"
         ;;
         
     close|deny|del|remove)
-        if [ -z "$PORT" ]; then
+        if [ -z "\$PORT" ]; then
             echo "❌ 错误: 请指定要关闭的端口号！"
             usage
         fi
-        echo ">>> 正在关闭 Docker 端口: $PORT/$PROTO ..."
-        ufw delete allow ${PORT}/${PROTO} >/dev/null 2>&1 || true
-        sed -i "/--ctorigdstport $PORT /d" "$RULES_FILE"
-        sed -i "/--dport $PORT /d" "$RULES_FILE"
+        echo ">>> 正在关闭 Docker 端口: \$PORT/\$PROTO ..."
+        ufw delete allow \${PORT}/\${PROTO} >/dev/null 2>&1 || true
+        sed -i "/--ctorigdstport \$PORT /d" "\$RULES_FILE"
+        sed -i "/--dport \$PORT /d" "\$RULES_FILE"
         ufw reload >/dev/null 2>&1
-        echo "✅ 端口 $PORT/$PROTO 已关闭，未授权访问已阻断！"
+        echo "✅ 端口 \$PORT/\$PROTO 已关闭，未授权访问已阻断！"
         ;;
         
     list|status|show)
@@ -405,12 +405,12 @@ case "$ACTION" in
         echo "默认系统级放行: 80, 443 (Web / HTTPS)"
         echo "--------------------------------------------------------"
         echo "自定义开放端口:"
-        PORTS=$(grep -oP "(?<=--ctorigdstport )[0-9]+" "$RULES_FILE" 2>/dev/null | sort -u || true)
-        if [ -z "$PORTS" ]; then
+        PORTS=\$(grep -oP "(?<=--ctorigdstport )[0-9]+" "\$RULES_FILE" 2>/dev/null | sort -u || true)
+        if [ -z "\$PORTS" ]; then
             echo "  (暂无自定义开放端口，所有其他未知端口严密阻断中)"
         else
-            for p in $PORTS; do
-                echo "  🔓 端口 $p [已放行，支持任意内外映射]"
+            for p in \$PORTS; do
+                echo "  🔓 端口 \$p [已放行，支持任意内外映射]"
             done
         fi
         echo "========================================================"
