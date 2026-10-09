@@ -291,9 +291,9 @@ ufw reject out 445/tcp comment 'Block SMB Out' || true
 ufw reject out 3333,4444,5555,7777,9000,14444/tcp comment 'Block Stratum Mining Out' || true
 
 # Docker 安全规则 (动态识别外网主网卡，容器出站全放行解除误杀，入站严格白名单与主动高危拦截)
-WAN_IF=$(ip -4 route show default 2>/dev/null | awk '{print $5}' | head -n1)
-[ -z "$WAN_IF" ] && WAN_IF=$(ip link | awk -F: '$0 !~ "lo|docker|br-|veth" && $2 ~ "^ [a-z]" {print $2; exit}' | tr -d ' ')
-[ -z "$WAN_IF" ] && WAN_IF="eth0"
+WAN_IF=\$(ip -4 route show default 2>/dev/null | awk '{print \$5}' | head -n1)
+[ -z "\$WAN_IF" ] && WAN_IF=\$(ip link | awk -F: '\$0 !~ "lo|docker|br-|veth" && \$2 ~ "^ [a-z]" {print \$2; exit}' | tr -d ' ')
+[ -z "\$WAN_IF" ] && WAN_IF="eth0"
 
 cat << RULES >> /etc/ufw/after.rules
 
@@ -306,7 +306,7 @@ cat << RULES >> /etc/ufw/after.rules
 -A DOCKER-USER -m conntrack --ctstate INVALID -j DROP
 -A DOCKER-USER -i docker0 -j ACCEPT
 -A DOCKER-USER -i br-+ -j ACCEPT
--A DOCKER-USER -o ${WAN_IF} -j ACCEPT
+-A DOCKER-USER -o \${WAN_IF} -j ACCEPT
 -A DOCKER-USER -p tcp -m multiport --dports 80,443 -j ACCEPT
 -A DOCKER-USER -j DROP
 COMMIT
