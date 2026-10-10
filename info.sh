@@ -259,7 +259,7 @@ if [ "$TEST_FIO" -eq 1 ] && command -v fio >/dev/null 2>&1; then
     echo ""
 fi
 
-# 8. YABS 官方双栈 iperf3 测速
+# 8. YABS 官方原版双栈 iperf3 测速引擎 (1:1 原版实现)
 if [ "$FAST_MODE" -eq 1 ]; then
     echo -e "${C_YELLOW}[ 全球节点上传与下载测速 ]${C_RESET}"
     echo -e " 检测到 --fast 参数，已跳过网络节点 iperf3 测速。\n"
@@ -267,105 +267,148 @@ if [ "$FAST_MODE" -eq 1 ]; then
     exit 0
 fi
 
-IPERF_LOCS_4=(
-    "Clouvider" "lon.speedtest.clouvider.net" "5200-5209" "英国 (伦敦 10G)"
-    "Eranium" "ams.speedtest.clouvider.net" "5200-5209" "荷兰 (阿姆斯特丹 100G)"
-    "Clouvider" "fra.speedtest.clouvider.net" "5200-5209" "德国 (法兰克福 10G)"
-    "Clouvider" "la.speedtest.clouvider.net" "5200-5209" "美国 (洛杉矶 10G)"
-    "Leaseweb" "speedtest.sin1.sg.leaseweb.net" "5201" "亚太 (新加坡 10G)"
-    "Leaseweb" "speedtest.tyo1.jp.leaseweb.net" "5201" "亚太 (日本 东京 10G)"
-)
+# 确保 ping 可用
+command -v ping >/dev/null 2>&1 && LOCAL_PING=true || unset LOCAL_PING
 
-IPERF_LOCS_6=(
-    "Clouvider" "lon.speedtest.clouvider.net" "5200-5209" "英国 (伦敦 10G)"
-    "Eranium" "ams.speedtest.clouvider.net" "5200-5209" "荷兰 (阿姆斯特丹 100G)"
-    "Clouvider" "fra.speedtest.clouvider.net" "5200-5209" "德国 (法兰克福 10G)"
-    "Clouvider" "la.speedtest.clouvider.net" "5200-5209" "美国 (洛杉矶 10G)"
-)
+# 原版 iperf_test 函数 (支持 3 次重试、动态随机端口、8线程并发、busy识别)
+iperf_test() {
+    local URL=$1
+    local PORTS=$2
+    local HOST=$3
+    local FLAGS=$4
 
-extract_speed() {
-    local raw="$1"
-    local res=$(echo "$raw" | grep -E "SUM|receiver|sender" | tail -n 1 | awk '{for(k=1;k<=NF;k++) if($k ~ /bits\/sec/) print $(k-1), $k}')
-    echo "$res"
-}
-
-run_yabs_suite() {
-    local IP_VER="$1"
-    local -n LOCS="$2"
-    local IP_FLAG=""
-    [ "$IP_VER" = "IPv4" ] && IP_FLAG="-4"
-    [ "$IP_VER" = "IPv6" ] && IP_FLAG="-6"
-
-    echo -e "${C_YELLOW}[ 全球节点上传与下载双向测速 (YABS 原版 ${IP_VER}) ]${C_RESET}"
-    echo -e "----------------------------------------------------------------------------------"
-    printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "提供商" "所在区域" "发送/上传速率" "接收/下载速率" "网络延迟"
-    echo -e "----------------------------------------------------------------------------------"
-
-    local total_nodes=$((${#LOCS[@]} / 4))
-    for ((i=0; i<total_nodes; i++)); do
-        local provider="${LOCS[i*4]}"
-        local host="${LOCS[i*4+1]}"
-        local port_range="${LOCS[i*4+2]}"
-        local region="${LOCS[i*4+3]}"
-
-        local ping_ms="N/A"
-        if [ "$IP_VER" = "IPv4" ]; then
-            ping_ms=$(ping -c 2 -W 2 "$host" 2>/dev/null | awk -F'/' 'END {if (NF>4) printf "%.1f ms", $5; else echo "超时"}')
-        else
-            ping_ms=$(ping6 -c 2 -W 2 "$host" 2>/dev/null | awk -F'/' 'END {if (NF>4) printf "%.1f ms", $5; else echo "超时"}')
+    # 1. 发送测试 (Attempt 1-3)
+    local I=1
+    while [ $I -le 3 ]; do
+        echo -en "正在测试 $MODE 发送/上传 -> $HOST (第 #$I 次尝试)..."
+        local PORT=""
+        if command -v shuf >/dev/null 2>&1; then
+            PORT=$(shuf -i "$PORTS" -n 1 2>/dev/null || echo "")
         fi
-        [ -z "$ping_ms" ] && ping_ms="超时"
-
-        local send_res="超时/不可达"
-        local recv_res="超时/不可达"
-
-        # 端口池自动探测
-        local port_list=()
-        if [[ "$port_range" =~ - ]]; then
-            local p_min=$(echo "$port_range" | cut -d- -f1)
-            local p_max=$(echo "$port_range" | cut -d- -f2)
-            for ((p=p_min; p<=p_max; p++)); do
-                port_list+=($p)
-            done
-        else
-            port_list+=("$port_range")
+        if [ -z "$PORT" ]; then
+            local p_min=$(echo "$PORTS" | cut -d- -f1)
+            local p_max=$(echo "$PORTS" | cut -d- -f2)
+            [ -z "$p_max" ] && p_max=$p_min
+            PORT=$(( p_min + RANDOM % (p_max - p_min + 1) ))
         fi
 
-        # 1. 发送/上传测试
-        for p in "${port_list[@]}"; do
-            local raw_send=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$p" -t 3 -P 4 2>&1 || true)
-            local val_send=$(extract_speed "$raw_send")
-            if [ -n "$val_send" ]; then
-                send_res="$val_send"
-                break
-            fi
-        done
-
-        # 2. 接收/下载测试
-        for p in "${port_list[@]}"; do
-            local raw_recv=$(timeout 6 "$IPERF_CMD" $IP_FLAG -c "$host" -p "$p" -t 3 -R 2>&1 || true)
-            local val_recv=$(extract_speed "$raw_recv")
-            if [ -n "$val_recv" ]; then
-                recv_res="$val_recv"
-                break
-            fi
-        done
-
-        printf "%-12s | %-24s | %-13s | %-13s | %-8s\n" "$provider" "$region" "$send_res" "$recv_res" "$ping_ms"
+        IPERF_RUN_SEND="$(timeout 15 "$IPERF_CMD" "$FLAGS" -c "$URL" -p "$PORT" -P 8 2>/dev/null || true)"
+        if [[ "$IPERF_RUN_SEND" == *"receiver"* && "$IPERF_RUN_SEND" != *"error"* ]]; then
+            local SPEED=$(echo "${IPERF_RUN_SEND}" | grep SUM | grep receiver | awk '{ print $6 }')
+            [[ -z $SPEED || "$SPEED" == "0.00" ]] && I=$(( I + 1 )) || I=11
+        else
+            [[ "$IPERF_RUN_SEND" == *"unable to connect"* ]] && I=11 || I=$(( I + 1 )) && sleep 2
+        fi
+        echo -en "\r\033[0K"
     done
-    echo -e "----------------------------------------------------------------------------------"
-    echo ""
+
+    sleep 1
+
+    # 2. 接收测试 (Attempt 1-3)
+    local J=1
+    while [ $J -le 3 ]; do
+        echo -en "正在测试 $MODE 接收/下载 <- $HOST (第 #$J 次尝试)..."
+        local PORT=""
+        if command -v shuf >/dev/null 2>&1; then
+            PORT=$(shuf -i "$PORTS" -n 1 2>/dev/null || echo "")
+        fi
+        if [ -z "$PORT" ]; then
+            local p_min=$(echo "$PORTS" | cut -d- -f1)
+            local p_max=$(echo "$PORTS" | cut -d- -f2)
+            [ -z "$p_max" ] && p_max=$p_min
+            PORT=$(( p_min + RANDOM % (p_max - p_min + 1) ))
+        fi
+
+        IPERF_RUN_RECV="$(timeout 15 "$IPERF_CMD" "$FLAGS" -c "$URL" -p "$PORT" -P 8 -R 2>/dev/null || true)"
+        if [[ "$IPERF_RUN_RECV" == *"receiver"* && "$IPERF_RUN_RECV" != *"error"* ]]; then
+            local SPEED=$(echo "${IPERF_RUN_RECV}" | grep SUM | grep receiver | awk '{ print $6 }')
+            [[ -z $SPEED || "$SPEED" == "0.00" ]] && J=$(( J + 1 )) || J=11
+        else
+            [[ "$IPERF_RUN_RECV" == *"unable to connect"* ]] && J=11 || J=$(( J + 1 )) && sleep 2
+        fi
+        echo -en "\r\033[0K"
+    done
+
+    # 延迟测试 (支持 IPv4/IPv6 ping)
+    local LATENCY_RUN=""
+    if [ -n "$LOCAL_PING" ]; then
+        LATENCY_RUN="$(ping $FLAGS -c 1 -W 2 "$URL" 2>/dev/null | grep -o 'time=.*' | sed 's/time=//' || true)"
+    fi
+    [ -z "$LATENCY_RUN" ] && LATENCY_RUN="--"
+
+    IPERF_SENDRESULT="$(echo "${IPERF_RUN_SEND}" | grep SUM | grep receiver)"
+    IPERF_RECVRESULT="$(echo "${IPERF_RUN_RECV}" | grep SUM | grep receiver)"
+    LATENCY_RESULT="${LATENCY_RUN}"
 }
 
-if [ "$IPV4" != "无 / 未分配" ]; then
-    run_yabs_suite "IPv4" IPERF_LOCS_4
+# 原版 launch_iperf 调度器
+launch_iperf() {
+    MODE=$1
+    local IPERF_FLAGS="-4"
+    [[ "$MODE" == *"IPv6"* ]] && IPERF_FLAGS="-6"
+
+    echo -e "${C_YELLOW}[ iperf3 全球网络测速 ($MODE) ]${C_RESET}"
+    echo -e "----------------------------------------------------------------------------------"
+    printf "%-12s | %-25s | %-15s | %-15s | %-10s\n" "提供商" "节点位置 (带宽)" "发送/上传速率" "接收/下载速率" "网络延迟"
+    printf "%-12s | %-25s | %-15s | %-15s | %-10s\n" "------------" "-------------------------" "---------------" "---------------" "----------"
+
+    for (( i = 0; i < IPERF_LOCS_NUM; i++ )); do
+        if [[ "${IPERF_LOCS[i*5+4]}" == *"$MODE"* ]]; then
+            iperf_test "${IPERF_LOCS[i*5]}" "${IPERF_LOCS[i*5+1]}" "${IPERF_LOCS[i*5+2]}" "$IPERF_FLAGS"
+
+            local SEND_VAL=$(echo "$IPERF_SENDRESULT" | awk '{ print $6 }')
+            local SEND_UNIT=$(echo "$IPERF_SENDRESULT" | awk '{ print $7 }')
+            local RECV_VAL=$(echo "$IPERF_RECVRESULT" | awk '{ print $6 }')
+            local RECV_UNIT=$(echo "$IPERF_RECVRESULT" | awk '{ print $7 }')
+            local LATENCY_VAL="${LATENCY_RESULT}"
+
+            [[ -z $SEND_VAL || "$SEND_VAL" == *"0.00"* ]] && SEND_VAL="busy" && SEND_UNIT=""
+            [[ -z $RECV_VAL || "$RECV_VAL" == *"0.00"* ]] && RECV_VAL="busy" && RECV_UNIT=""
+
+            printf "%-12s | %-25s | %-15s | %-15s | %-10s\n" \
+                "${IPERF_LOCS[i*5+2]}" \
+                "${IPERF_LOCS[i*5+3]}" \
+                "$SEND_VAL $SEND_UNIT" \
+                "$RECV_VAL $RECV_UNIT" \
+                "$LATENCY_VAL"
+        fi
+    done
+    echo -e "----------------------------------------------------------------------------------\n"
+}
+
+# YABS 2026 官方最新维护的活跃服务器列表
+IPERF_LOCS=(
+    "lon.speedtest.clouvider.net" "5200-5209" "Clouvider" "英国伦敦 (10G)" "IPv4|IPv6"
+    "iperf-ams-nl.eranium.net" "5201-5210" "Eranium" "荷兰阿姆斯特丹 (100G)" "IPv4|IPv6"
+    "speedtest.uztelecom.uz" "5200-5209" "Uztelecom" "乌兹别克斯坦塔什干 (10G)" "IPv4|IPv6"
+    "speedtest.sin1.sg.leaseweb.net" "5201-5210" "Leaseweb" "新加坡 (10G)" "IPv4|IPv6"
+    "la.speedtest.clouvider.net" "5200-5209" "Clouvider" "美国洛杉矶 (10G)" "IPv4|IPv6"
+    "speedtest.nyc1.us.leaseweb.net" "5201-5210" "Leaseweb" "美国纽约 (10G)" "IPv4|IPv6"
+    "speedtest.sao1.edgoo.net" "9204-9240" "Edgoo" "巴西圣保罗 (1G)" "IPv4|IPv6"
+)
+
+IPERF_LOCS_NUM=$((${#IPERF_LOCS[@]} / 5))
+
+# 准备并校准 iperf3 二进制文件
+if ! command -v "$IPERF_CMD" >/dev/null 2>&1; then
+    mkdir -p /tmp/yabs_bin
+    ARCH_MAP="x64"
+    [[ "$ARCH" == *aarch64* || "$ARCH" == *arm* ]] && ARCH_MAP="aarch64"
+    curl -sfL --connect-timeout 5 --retry 3 "https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf/iperf3_${ARCH_MAP}" -o /tmp/yabs_bin/iperf3 2>/dev/null || \
+    curl -sfL --connect-timeout 5 --retry 3 "https://github.com/masonr/yet-another-bench-script/releases/download/iperf3-3.21/iperf3_${ARCH_MAP}" -o /tmp/yabs_bin/iperf3 2>/dev/null || true
+    chmod +x /tmp/yabs_bin/iperf3 2>/dev/null || true
+    [ -s /tmp/yabs_bin/iperf3 ] && IPERF_CMD="/tmp/yabs_bin/iperf3"
 fi
 
-if [ "$IPV6" != "无 / 未分配" ]; then
-    run_yabs_suite "IPv6" IPERF_LOCS_6
+if [ -x "$IPERF_CMD" ] || command -v "$IPERF_CMD" >/dev/null 2>&1; then
+    [ "$IPV4" != "无 / 未分配" ] && launch_iperf "IPv4"
+    [ "$IPV6" != "无 / 未分配" ] && launch_iperf "IPv6"
+    if [ "$IPV6" = "无 / 未分配" ]; then
+        echo -e "${C_YELLOW}[ iperf3 全球网络测速 (IPv6) ]${C_RESET}"
+        echo -e " 当前主机未检测到公网 IPv6 地址，已跳过 IPv6 测速。\n"
+    fi
 else
-    echo -e "${C_YELLOW}[ 全球节点上传与下载双向测速 (YABS 原版 IPv6) ]${C_RESET}"
-    echo -e " 当前主机未检测到可用公网 IPv6 地址，已自动跳过 IPv6 测速。\n"
+    echo -e "${C_RED}错误: 未能获取到可执行的 iperf3 工具，已跳过网络测速。${C_RESET}\n"
 fi
 
 echo -e "${C_GREEN}测试完成！${C_RESET}"
