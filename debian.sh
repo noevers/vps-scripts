@@ -383,8 +383,11 @@ case "\$ACTION" in
             sed -i "/-A DOCKER-USER -j DROP/i -A DOCKER-USER -p \$PROTO --dport \$PORT -j ACCEPT" "\$RULES_FILE"
         fi
         
+        # 实时动态注入到运行中的 iptables DOCKER-USER 链顶端（彻底解决 ufw reload 不清空链导致 DROP 依然先生效的问题）
+        iptables -I DOCKER-USER 1 -p \$PROTO -m conntrack --ctorigdstport \$PORT -j ACCEPT 2>/dev/null || true
+        iptables -I DOCKER-USER 2 -p \$PROTO --dport \$PORT -j ACCEPT 2>/dev/null || true
         ufw reload >/dev/null 2>&1
-        echo "✅ 端口 \$PORT/\$PROTO 已经成功放行！(支持任意宿主机与容器内部端口映射)"
+        echo "✅ 端口 \$PORT/\$PROTO 已经成功放行并实时生效！(支持任意宿主机与容器内部端口映射)"
         ;;
         
     close|deny|del|remove)
@@ -396,6 +399,9 @@ case "\$ACTION" in
         ufw delete allow \${PORT}/\${PROTO} >/dev/null 2>&1 || true
         sed -i "/--ctorigdstport \$PORT /d" "\$RULES_FILE"
         sed -i "/--dport \$PORT /d" "\$RULES_FILE"
+        # 实时从运行中的 iptables DOCKER-USER 链中删除
+        while iptables -D DOCKER-USER -p \$PROTO -m conntrack --ctorigdstport \$PORT -j ACCEPT 2>/dev/null; do :; done
+        while iptables -D DOCKER-USER -p \$PROTO --dport \$PORT -j ACCEPT 2>/dev/null; do :; done
         ufw reload >/dev/null 2>&1
         echo "✅ 端口 \$PORT/\$PROTO 已关闭，未授权访问已阻断！"
         ;;
