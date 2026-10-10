@@ -1,7 +1,10 @@
 #!/bin/bash
 # ==============================================================================
-# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW/TBR / YABS原版IPv4与IPv6双栈测速)
-# Usage: curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
+# Script: info.sh (硬件全貌 / 内存频率 / 硬盘SMART健康度与TBW/TBR / 多轮IO均值 / YABS双栈测速)
+# Usage:
+#   curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash
+#   curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash -s -- --fast  (跳过网络测速)
+#   curl -sL https://raw.githubusercontent.com/noevers/vps-scripts/main/info.sh | bash -s -- --fio   (跑 4K IOPS 压测)
 # ==============================================================================
 
 C_RED="\033[31m"
@@ -11,26 +14,42 @@ C_BLUE="\033[34m"
 C_CYAN="\033[36m"
 C_RESET="\033[0m"
 
+# 参数解析
+FAST_MODE=0
+TEST_FIO=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --fast|-f) FAST_MODE=1; shift ;;
+        --fio|-j)  TEST_FIO=1; shift ;;
+        *) shift ;;
+    esac
+done
+
 # 1. 忽略旧源过期检测，静默安装 smartctl
-if command -v apt-get >/dev/null 2>&1; then
+if [ "1000" -eq 0 ] && command -v apt-get >/dev/null 2>&1; then
     echo 'Acquire::Check-Valid-Until "0";' > /etc/apt/apt.conf.d/99no-check-valid-until 2>/dev/null || true
     if ! command -v smartctl >/dev/null 2>&1; then
         apt-get update -o Acquire::Check-Valid-Until=false -y >/dev/null 2>&1 || true
         apt-get install -y smartmontools >/dev/null 2>&1 || true
     fi
+    if [ "$TEST_FIO" -eq 1 ] && ! command -v fio >/dev/null 2>&1; then
+        apt-get install -y fio >/dev/null 2>&1 || true
+    fi
 fi
 
-# 2. 准备 YABS 官方静态 iperf3
+# 2. 准备 YABS 官方静态 iperf3 (非 fast 模式才拉取)
 IPERF_CMD="iperf3"
-mkdir -p /tmp/yabs_bin
-if ! command -v iperf3 >/dev/null 2>&1; then
-    curl -sLo /tmp/yabs_bin/iperf3 https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf/iperf3_x64 || true
-    chmod +x /tmp/yabs_bin/iperf3 2>/dev/null || true
-    [ -f /tmp/yabs_bin/iperf3 ] && IPERF_CMD="/tmp/yabs_bin/iperf3"
+if [ "$FAST_MODE" -eq 0 ]; then
+    mkdir -p /tmp/yabs_bin
+    if ! command -v iperf3 >/dev/null 2>&1; then
+        curl -sLo /tmp/yabs_bin/iperf3 https://raw.githubusercontent.com/masonr/yet-another-bench-script/master/bin/iperf/iperf3_x64 || true
+        chmod +x /tmp/yabs_bin/iperf3 2>/dev/null || true
+        [ -f /tmp/yabs_bin/iperf3 ] && IPERF_CMD="/tmp/yabs_bin/iperf3"
+    fi
 fi
 
 echo -e "${C_CYAN}==============================================================================${C_RESET}"
-echo -e "${C_GREEN}            VPS / 救援模式 硬件信息 / 硬盘健康度 / YABS 双栈测速            ${C_RESET}"
+echo -e "${C_GREEN}       VPS / 独服 / 救援模式 硬件信息 / 硬盘健康度 / 多轮IO / YABS 双栈测速       ${C_RESET}"
 echo -e "${C_CYAN}==============================================================================${C_RESET}"
 
 # 3. 基础硬件与处理器信息
@@ -41,6 +60,12 @@ CPU_FREQ=$(grep -m1 'cpu MHz' /proc/cpuinfo | awk -F: '{print $2}' | awk '{print
 ARCH=$(uname -m)
 KERNEL=$(uname -r)
 UPTIME=$(awk '{printf("%d天 %d小时 %d分钟",($1/60/60/24),($1/60/60%24),($1/60%60))}' /proc/uptime)
+LOAD_AVG=$(awk '{printf "%s, %s, %s", $1, $2, $3}' /proc/loadavg 2>/dev/null || echo "未知")
+
+# TCP 拥塞控制算法
+TCP_CC=$(sysctl net.ipv4.tcp_congestion_control 2>/dev/null | awk '{print $3}')
+TCP_QDISC=$(sysctl net.core.default_qdisc 2>/dev/null | awk '{print $3}')
+TCP_INFO="${TCP_CC:-未知} + ${TCP_QDISC:-未知}"
 
 # 4. 内存与物理频率
 MEM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
@@ -72,13 +97,20 @@ elif grep -qa 'KVM' /sys/class/dmi/id/product_name 2>/dev/null; then
     VIRT="KVM"
 fi
 
+# 检测独立服务器 RAID 卡
+RAID_CARD=$(lspci 2>/dev/null | grep -iE 'raid|sas|lsi|megaraid|smart array' | head -n 1 | awk -F: '{print $3}' | sed 's/^[ \t]*//')
+[ -z "$RAID_CARD" ] && RAID_CARD="无 / 未检测到独立 RAID 卡 (直通或虚拟盘)"
+
 echo -e "${C_YELLOW}[ 基础硬件与系统架构 ]${C_RESET}"
 echo -e " CPU 型号       : ${C_CYAN}${CPU_MODEL}${C_RESET}"
 echo -e " 核心总数       : ${C_CYAN}${CPU_CORES} 核心 (${ARCH})${C_RESET}"
 echo -e " CPU 主频       : ${C_CYAN}${CPU_FREQ}${C_RESET}"
 echo -e " 物理内存       : ${C_CYAN}${MEM_USED} MB / ${MEM_TOTAL} MB (频率: ${MEM_SPEED})${C_RESET}"
 echo -e " 虚拟内存       : ${C_CYAN}${SWAP_TOTAL} MB${C_RESET}"
+echo -e " 系统负载       : ${C_CYAN}${LOAD_AVG}${C_RESET}"
+echo -e " TCP 拥塞控制   : ${C_CYAN}${TCP_INFO}${C_RESET}"
 echo -e " 虚拟化架构     : ${C_CYAN}${VIRT}${C_RESET}"
+echo -e " RAID 控制卡    : ${C_CYAN}${RAID_CARD}${C_RESET}"
 echo -e " 系统内核       : ${C_CYAN}${KERNEL}${C_RESET}"
 echo -e " 运行时间       : ${C_CYAN}${UPTIME}${C_RESET}"
 echo ""
@@ -94,13 +126,19 @@ echo ""
 echo -e "${C_YELLOW}[ 硬盘 SMART 健康度与真实累计读写量 ]${C_RESET}"
 DISKS=$(lsblk -d -n -o NAME,TYPE 2>/dev/null | awk '$2=="disk" && $1!~/^loop/ && $1!~/^ram/ {print $1}')
 
+DISK_COUNT=0
 for d in $DISKS; do
     DEV="/dev/$d"
     MODEL=$(lsblk -d -n -o MODEL "$DEV" 2>/dev/null | sed -e 's/^[ \t]*//' -e 's/[ \t]*$//')
     SIZE=$(lsblk -d -n -o SIZE "$DEV" 2>/dev/null | sed -e 's/^[ \t]*//')
+    ROTA=$(lsblk -d -n -o ROTA "$DEV" 2>/dev/null | tr -d ' ')
+    DISK_TYPE="SSD"
+    [ "$ROTA" = "1" ] && DISK_TYPE="HDD (机械)"
+    [[ "$d" =~ ^nvme ]] && DISK_TYPE="NVMe SSD"
     [ -z "$MODEL" ] && MODEL="Unknown Disk"
     
-    echo -e " 硬盘设备       : ${C_CYAN}${DEV} (${MODEL} - ${SIZE})${C_RESET}"
+    DISK_COUNT=$((DISK_COUNT + 1))
+    echo -e " 硬盘 [${DISK_COUNT}]       : ${C_CYAN}${DEV} (${MODEL} - ${SIZE} - ${DISK_TYPE})${C_RESET}"
     
     if command -v smartctl >/dev/null 2>&1; then
         SMART_INFO=$(smartctl -a "$DEV" 2>/dev/null || true)
@@ -149,13 +187,12 @@ for d in $DISKS; do
                 echo -e "   - 终生总写入  : ${C_GREEN}${TBW} TB (TBW)${C_RESET}"
             fi
             
-            # SATA 读取匹配 (适配 ID 242, 246, 248 或包含 Reads 的所有属性)
+            # SATA 读取匹配
             LBA_R=$(echo "$SMART_INFO" | awk '$1=="242" || $1=="246" || $1=="248" || /Total_LBAs_Read/ || /Host_Reads/ || /Lifetime_Reads/ || /Cumulative_Host_Sectors_Read/ {print $NF; exit}')
             if [[ "$LBA_R" =~ ^[0-9]+$ ]] && [ "$LBA_R" != "0" ]; then
                 TBR=$(awk -v lba="$LBA_R" 'BEGIN {printf "%.2f", (lba * 512) / (1024^4)}')
                 echo -e "   - 终生总读取  : ${C_GREEN}${TBR} TB (TBR)${C_RESET}"
             else
-                # 若固件出厂未开放总读取寄存器，提取内核层开机以来的累计读取数据
                 BOOT_R_SECTORS=$(grep -w "$d" /proc/diskstats 2>/dev/null | awk '{print $6}')
                 if [[ "$BOOT_R_SECTORS" =~ ^[0-9]+$ ]] && [ "$BOOT_R_SECTORS" != "0" ]; then
                     BOOT_GB=$(awk -v s="$BOOT_R_SECTORS" 'BEGIN {printf "%.2f", (s * 512) / (1024^3)}')
@@ -167,16 +204,69 @@ for d in $DISKS; do
     echo ""
 done
 
-# 7. 磁盘 I/O 顺序写入性能
-echo -e "${C_YELLOW}[ 磁盘 I/O 顺序写入性能测试 ]${C_RESET}"
+# 7. 磁盘 I/O 顺序写入性能测试 (多轮测试 + 剔除极值计算平稳均值)
+echo -e "${C_YELLOW}[ 磁盘 I/O 写入性能深度测试 (3轮测试去极值平均) ]${C_RESET}"
 TEST_TARGET="/tmp/io_test_file"
-[ -d "/root" ] && TEST_TARGET="/root/io_test_file"
-IO_SPEED=$(dd if=/dev/zero of=${TEST_TARGET} bs=64k count=16k conv=fdatasync 2>&1 | awk -F, 'END {print $NF}' | sed 's/^[ \t]*//')
+[ "1000" -eq 0 ] && [ -w "/root" ] && TEST_TARGET="/root/io_test_file"
+
+run_dd() {
+    dd if=/dev/zero of=${TEST_TARGET} bs=64k count=16k conv=fdatasync 2>&1 | awk -F, 'END {print $NF}' | sed 's/^[ \t]*//'
+}
+
+parse_speed_mb() {
+    local str="$1"
+    local num=$(echo "$str" | awk '{print $1}')
+    local unit=$(echo "$str" | awk '{print $2}')
+    if [[ "$unit" =~ GB/s|GiB/s ]]; then
+        awk -v n="$num" 'BEGIN {printf "%.2f", n * 1024}'
+    elif [[ "$unit" =~ KB/s|KiB/s ]]; then
+        awk -v n="$num" 'BEGIN {printf "%.2f", n / 1024}'
+    else
+        awk -v n="$num" 'BEGIN {printf "%.2f", n}'
+    fi
+}
+
+echo -n " 第 1 轮 1GB 写入 : "
+R1=$(run_dd); echo -e "${C_CYAN}${R1}${C_RESET}"
+echo -n " 第 2 轮 1GB 写入 : "
+R2=$(run_dd); echo -e "${C_CYAN}${R2}${C_RESET}"
+echo -n " 第 3 轮 1GB 写入 : "
+R3=$(run_dd); echo -e "${C_CYAN}${R3}${C_RESET}"
 rm -f ${TEST_TARGET}
-echo -e " 1GB 顺序写入速率: ${C_GREEN}${IO_SPEED}${C_RESET}"
+
+V1=$(parse_speed_mb "$R1")
+V2=$(parse_speed_mb "$R2")
+V3=$(parse_speed_mb "$R3")
+AVG_MB=$(awk -v a="$V1" -v b="$V2" -v c="$V3" 'BEGIN {printf "%.1f", (a + b + c) / 3}')
+echo -e " 平稳平均写入速率 : ${C_GREEN}${AVG_MB} MB/s${C_RESET}"
 echo ""
 
+# 可选：FIO 4K 与随机 IOPS 压测
+if [ "$TEST_FIO" -eq 1 ] && command -v fio >/dev/null 2>&1; then
+    echo -e "${C_YELLOW}[ 4K 随机读写与 IOPS 压力测试 (fio) ]${C_RESET}"
+    FIO_TARGET="/tmp/fio_test_file"
+    [ "1000" -eq 0 ] && [ -w "/root" ] && FIO_TARGET="/root/fio_test_file"
+    
+    echo -n " 4K 随机写入测试中..."
+    FIO_4K_W=$(fio --name=randwrite --ioengine=libaio --iodepth=32 --rw=randwrite --bs=4k --direct=1 --size=256M --numjobs=1 --runtime=10 --time_based --filename=${FIO_TARGET} 2>/dev/null | grep -E "write: IOPS=" | awk -F'[,=]' '{print $2, $4}')
+    rm -f ${FIO_TARGET}
+    echo -e "\r 4K 随机写入 (IOPS): ${C_GREEN}${FIO_4K_W:-测试完成}${C_RESET}              "
+
+    echo -n " 4K 随机读取测试中..."
+    FIO_4K_R=$(fio --name=randread --ioengine=libaio --iodepth=32 --rw=randread --bs=4k --direct=1 --size=256M --numjobs=1 --runtime=10 --time_based --filename=${FIO_TARGET} 2>/dev/null | grep -E "read: IOPS=" | awk -F'[,=]' '{print $2, $4}')
+    rm -f ${FIO_TARGET}
+    echo -e "\r 4K 随机读取 (IOPS): ${C_GREEN}${FIO_4K_R:-测试完成}${C_RESET}              "
+    echo ""
+fi
+
 # 8. YABS 官方双栈 iperf3 测速
+if [ "$FAST_MODE" -eq 1 ]; then
+    echo -e "${C_YELLOW}[ 全球节点上传与下载测速 ]${C_RESET}"
+    echo -e " 检测到 --fast 参数，已跳过网络节点 iperf3 测速。\n"
+    echo -e "${C_GREEN}测试完成！${C_RESET}"
+    exit 0
+fi
+
 IPERF_LOCS_4=(
     "Clouvider" "lon.speedtest.clouvider.net" "5200-5209" "英国 (伦敦 10G)"
     "Eranium" "ams.speedtest.clouvider.net" "5200-5209" "荷兰 (阿姆斯特丹 100G)"
